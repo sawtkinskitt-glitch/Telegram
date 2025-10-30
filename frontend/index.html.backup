@@ -836,42 +836,23 @@
 
             /* Hide command rail on mobile, show only accounts list */
             .command-rail {
-                display: none !important;
+                display: none;
             }
 
             .accounts-pane {
                 border-right: none;
-                padding: 0;
-                background: var(--apple-white);
+                padding-left: 0;
             }
 
             .accounts-table {
-                padding: 0 12px;
+                padding-left: 8px;
             }
 
             .table-header {
                 flex-direction: column;
                 gap: 12px;
                 align-items: stretch;
-                padding: 16px !important;
-                background: var(--apple-white);
-            }
-            
-            .table-controls {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 8px;
-                width: 100%;
-            }
-            
-            .table-search {
-                flex: 1 1 100%;
-                min-width: 0;
-            }
-            
-            .quick-filter {
-                padding: 8px 12px !important;
-                font-size: 13px !important;
+                padding: 16px 16px 16px 20px !important;
             }
 
             .table-header > div:first-child {
@@ -956,16 +937,12 @@
         /* Small mobile breakpoint - 480px (must come AFTER 734px for proper cascade) */
         @media (max-width: 480px) {
             :root {
-                --spacing-md: 10px;
-                --spacing-lg: 14px;
-            }
-            
-            .nav-content {
-                padding: 0 10px;
+                --spacing-md: 12px;
+                --spacing-lg: 16px;
             }
             
             .nav-text {
-                font-size: 15px;
+                font-size: 16px;
             }
             
             .nav-badge {
@@ -977,24 +954,8 @@
             }
             
             .stats-container {
-                grid-template-columns: 1fr;
-                gap: 10px;
-            }
-            
-            .stat-card {
-                padding: 14px;
-            }
-            
-            /* Even smaller header buttons */
-            .help-button {
-                width: 32px !important;
-                height: 32px !important;
-            }
-            
-            .account-dropdown-trigger {
-                padding: 5px 8px !important;
-                font-size: 13px !important;
-                min-width: auto !important;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 12px;
             }
             
             .stat-value {
@@ -1683,18 +1644,12 @@
         .quick-filter.active {
             background: var(--apple-blue);
             color: white;
-            font-weight: 600;
-        }
-        
-        .quick-filter:hover:not(.active) {
-            background: var(--apple-gray-3);
         }
 
         /* Account Table - Virtualized */
         .accounts-table {
             flex: 1;
             overflow-y: auto;
-            background: var(--apple-white);
             overflow-x: hidden;
         }
 
@@ -2270,23 +2225,19 @@
         .btn-primary {
             background: var(--apple-blue);
             color: white;
-            font-weight: 600;
         }
 
         .btn-primary:hover {
-            opacity: 0.9;
-            transform: scale(0.98);
+            opacity: 0.8;
         }
 
         .btn-secondary {
             background: var(--apple-gray-2);
             color: var(--apple-black);
-            font-weight: 600;
         }
 
         .btn-secondary:hover {
             background: var(--apple-gray-3);
-            transform: scale(0.98);
         }
 
         /* Mobile Command Palette FAB */
