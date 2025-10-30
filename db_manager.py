@@ -1,7 +1,9 @@
 import os
+import time
 from collections import defaultdict
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from typing import Optional
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -127,6 +129,15 @@ def init_database():
 
         cursor.execute("""ALTER TABLE telegram_accounts
                           ADD COLUMN IF NOT EXISTS total_clones INTEGER DEFAULT 0""")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS userbot_session_locks (
+                account_id BIGINT PRIMARY KEY,
+                instance_id TEXT NOT NULL,
+                acquired_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                heartbeat_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_flood_wait_account ON flood_wait_events(account_id, occurred_at)
@@ -337,6 +348,131 @@ class AccountManager:
                 (status, account_id),
             )
             cursor.close()
+
+class SessionLockManager:
+    """Coordinate exclusive session ownership across processes."""
+
+    DEFAULT_TTL_SECONDS = 120
+    DEFAULT_WAIT_TIMEOUT = 180
+    DEFAULT_POLL_INTERVAL = 5
+
+    @staticmethod
+    def _normalize_account_id(account_id: Optional[int]) -> int:
+        try:
+            return int(account_id)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def try_acquire_session_lock(
+        account_id: Optional[int],
+        instance_id: str,
+        ttl_seconds: Optional[int] = None,
+    ) -> bool:
+        if not instance_id:
+            raise ValueError("instance_id is required to acquire a session lock")
+
+        acct_id = SessionLockManager._normalize_account_id(account_id)
+        ttl = ttl_seconds or SessionLockManager.DEFAULT_TTL_SECONDS
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                DELETE FROM userbot_session_locks
+                WHERE account_id = %s
+                  AND heartbeat_at < NOW() - (%s * INTERVAL '1 second')
+                """,
+                (acct_id, ttl),
+            )
+            cursor.execute(
+                """
+                INSERT INTO userbot_session_locks (account_id, instance_id, acquired_at, heartbeat_at)
+                VALUES (%s, %s, NOW(), NOW())
+                ON CONFLICT DO NOTHING
+                """,
+                (acct_id, instance_id),
+            )
+            acquired = cursor.rowcount == 1
+            cursor.close()
+
+        return acquired
+
+    @staticmethod
+    def acquire_session_lock(
+        account_id: Optional[int],
+        instance_id: str,
+        wait_timeout: Optional[int] = None,
+        poll_interval: Optional[int] = None,
+        ttl_seconds: Optional[int] = None,
+    ) -> bool:
+        wait = wait_timeout or SessionLockManager.DEFAULT_WAIT_TIMEOUT
+        poll = poll_interval or SessionLockManager.DEFAULT_POLL_INTERVAL
+        ttl = ttl_seconds or SessionLockManager.DEFAULT_TTL_SECONDS
+
+        deadline = time.monotonic() + max(wait, 0)
+        while True:
+            if SessionLockManager.try_acquire_session_lock(account_id, instance_id, ttl):
+                return True
+
+            if time.monotonic() >= deadline:
+                return False
+
+            time.sleep(max(poll, 1))
+
+    @staticmethod
+    def refresh_session_lock(account_id: Optional[int], instance_id: str) -> bool:
+        acct_id = SessionLockManager._normalize_account_id(account_id)
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE userbot_session_locks
+                SET heartbeat_at = NOW()
+                WHERE account_id = %s AND instance_id = %s
+                """,
+                (acct_id, instance_id),
+            )
+            updated = cursor.rowcount == 1
+            cursor.close()
+
+        return updated
+
+    @staticmethod
+    def release_session_lock(account_id: Optional[int], instance_id: str) -> None:
+        acct_id = SessionLockManager._normalize_account_id(account_id)
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                DELETE FROM userbot_session_locks
+                WHERE account_id = %s AND instance_id = %s
+                """,
+                (acct_id, instance_id),
+            )
+            cursor.close()
+
+    @staticmethod
+    def get_lock_holder(account_id: Optional[int]) -> Optional[dict]:
+        acct_id = SessionLockManager._normalize_account_id(account_id)
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute(
+                """
+                SELECT instance_id, acquired_at, heartbeat_at
+                FROM userbot_session_locks
+                WHERE account_id = %s
+                """,
+                (acct_id,),
+            )
+            row = cursor.fetchone()
+            cursor.close()
+
+        return dict(row) if row else None
+
 
 class SafetyMetricsManager:
     """Manage safety metrics and reports - aligned with existing schema"""
