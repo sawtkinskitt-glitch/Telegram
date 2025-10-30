@@ -444,11 +444,32 @@ def sync_account_profile(account_id):
 
 @app.route('/health')
 def health():
-    """Health check endpoint"""
+    """Health check endpoint with process status"""
+    import os
+    
+    # Check if userbot process is running
+    userbot_running = False
+    userbot_pid = None
+    
+    if os.path.exists('/tmp/moonuserbot.pid'):
+        try:
+            with open('/tmp/moonuserbot.pid', 'r') as f:
+                userbot_pid = int(f.read().strip())
+            # Check if process is alive
+            os.kill(userbot_pid, 0)
+            userbot_running = True
+        except (OSError, ValueError, ProcessLookupError):
+            userbot_running = False
+    
     return jsonify({
-        'status': 'healthy',
+        'status': 'healthy' if userbot_running else 'degraded',
         'timestamp': datetime.now().isoformat(),
-        'service': 'Moon-Userbot Dashboard'
+        'service': 'Moon-Userbot Dashboard',
+        'userbot': {
+            'running': userbot_running,
+            'pid': userbot_pid
+        },
+        'details': 'Web server is running' + (' and userbot is active' if userbot_running else ', but userbot is not running')
     })
 
 @app.route('/api/safety/limits/<int:account_id>')
