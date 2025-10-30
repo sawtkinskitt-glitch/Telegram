@@ -142,6 +142,32 @@ If you're using Docker Compose version 2.x, use the following commands to start 
     docker compose -f compose.yml down && docker compose -f compose.yml pull && docker compose -f compose.yml up -d
     ```
 
+#### 🧪 Render-like local stack (web + Postgres)
+
+To reproduce Render's environment 1:1 (same Docker image, Gunicorn process model, and a managed Postgres instance):
+
+1. Copy the Render defaults and secrets into a local env file:
+   ```shell
+   cp .env.render.example .env
+   ```
+   > **Note** Replace any credentials you have rotated in production. The sample file mirrors the values from `render.yaml` so you can get started instantly.
+2. Build and bootstrap both services (database + web):
+   ```shell
+   docker compose up --build
+   ```
+   The `db` container exposes Postgres on `5432` for debugging; the web tier maps Render's port (`8080`) to your host so you can hit `http://localhost:8080/health`.
+3. Follow the container logs to verify startup:
+   ```shell
+   docker compose logs -f moonuserbot
+   ```
+   You should see the session lock acquisition message, module loading, and the `Moon-Userbot started!` banner. If another instance already holds the session, the container exits cleanly after printing the lock holder details.
+
+When you're done testing:
+```shell
+docker compose down -v
+```
+This stops both containers and removes the ephemeral Postgres volume.
+
 > [!IMPORTANT]
 > Make Sure you add appropriate env vars
 
