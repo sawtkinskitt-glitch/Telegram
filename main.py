@@ -44,6 +44,8 @@ import os
 import platform
 import sqlite3
 import subprocess
+import sys
+import fcntl
 
 import requests
 from pyrogram import Client, errors, idle
@@ -63,6 +65,37 @@ from utils.device_fingerprints import get_fingerprint_for_account
 SCRIPT_PATH = os.path.dirname(os.path.realpath(__file__))
 if SCRIPT_PATH != os.getcwd():
     os.chdir(SCRIPT_PATH)
+
+# Singleton lock to prevent multiple instances
+LOCK_FILE = "/tmp/moonuserbot_instance.lock"
+lock_fd = None
+
+def acquire_singleton_lock():
+    """Ensure only one instance of the userbot is running"""
+    global lock_fd
+    try:
+        lock_fd = open(LOCK_FILE, 'w')
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_fd.write(str(os.getpid()))
+        lock_fd.flush()
+        logging.info("✅ Singleton lock acquired (PID: %s)", os.getpid())
+        return True
+    except IOError:
+        logging.error("❌ Another instance is already running! Exiting to prevent AUTH_KEY_DUPLICATED.")
+        logging.error("   If you're sure no other instance is running, delete: %s", LOCK_FILE)
+        return False
+
+def release_singleton_lock():
+    """Release the singleton lock"""
+    global lock_fd
+    if lock_fd:
+        try:
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+            lock_fd.close()
+            os.remove(LOCK_FILE)
+            logging.info("🔓 Singleton lock released")
+        except Exception as e:
+            logging.debug("Lock cleanup error (non-critical): %s", e)
 
 # Resolve session credentials
 ACCOUNT_SOURCE = "config"
@@ -188,6 +221,11 @@ async def main():
         handlers=[logging.FileHandler("moonlogs.txt"), logging.StreamHandler()],
         level=logging.INFO,
     )
+    
+    # Acquire singleton lock to prevent multiple instances
+    if not acquire_singleton_lock():
+        raise SystemExit(3)  # Exit code 3 for "already running"
+    
     DeleteAccount.__new__ = None
 
     logging.info(
@@ -206,19 +244,49 @@ async def main():
             subprocess.run(["fuser", "-k", "my_account.session"], check=True)
             restart()
         raise
+    except errors.AuthKeyDuplicated as e:
+        logging.error(
+            "AUTH_KEY_DUPLICATED: %s\n"
+            "This session is being used simultaneously elsewhere (another server/device).\n"
+            "Possible causes:\n"
+            "  1. Old deployment still running with same session\n"
+            "  2. Session being used on another device\n"
+            "  3. Multiple instances of this bot running\n"
+            "Solution: Stop all other instances and wait 30 seconds before restarting.",
+            e,
+        )
+        
+        if USING_DB_SESSION and PRIMARY_ACCOUNT_ID:
+            try:
+                AccountManager.clear_account_session(PRIMARY_ACCOUNT_ID, status="auth_key_duplicated")
+                logging.error(
+                    "Cleared stored session for account ID %s due to duplicate auth key.",
+                    PRIMARY_ACCOUNT_ID,
+                )
+            except Exception as cleanup_error:
+                logging.error("Failed to clear account session: %s", cleanup_error)
+            logging.error(
+                "Primary account session is no longer valid. Re-authenticate the account via the dashboard."
+            )
+            raise SystemExit(2)  # Exit code 2 for auth_key_duplicated
+        
+        raise SystemExit(2)
     except (errors.NotAcceptable, errors.Unauthorized) as e:
         logging.error(
-            "%s: %s\nMoving session file to my_account.session-old...",
+            "%s: %s\nHandling authentication error...",
             e.__class__.__name__,
             e,
         )
-        if os.path.exists("./my_account.session"):
+        
+        # Only try to handle session files if NOT using in_memory mode
+        if not common_params.get("in_memory") and os.path.exists("./my_account.session"):
             try:
                 os.rename("./my_account.session", "./my_account.session-old")
-            except FileNotFoundError:
-                logging.warning("Session file missing during cleanup; continuing")
+                logging.warning("Moved session file to my_account.session-old")
+            except (FileNotFoundError, OSError) as file_error:
+                logging.warning("Could not move session file: %s", file_error)
         else:
-            logging.warning("Session file not found, creating fresh start...")
+            logging.warning("Using in-memory session, no file cleanup needed")
 
         if USING_DB_SESSION and PRIMARY_ACCOUNT_ID:
             try:
@@ -291,7 +359,16 @@ async def main():
     await idle()
 
     await app.stop()
+    release_singleton_lock()
 
 
 if __name__ == "__main__":
-    app.run(main())
+    try:
+        app.run(main())
+    except KeyboardInterrupt:
+        logging.info("🛑 Received interrupt signal, shutting down gracefully...")
+        release_singleton_lock()
+    except Exception as e:
+        logging.error("💥 Unhandled exception: %s", e)
+        release_singleton_lock()
+        raise
