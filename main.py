@@ -233,6 +233,21 @@ async def main():
         ACCOUNT_SOURCE,
         account_id,
     )
+    
+    # Initialize distributed lock manager
+    from distributed_lock_manager import DistributedLockManager
+    lock_manager = DistributedLockManager(account_id)
+    
+    # Acquire distributed lock to prevent AUTH_KEY_DUPLICATED
+    logging.info("🔒 Acquiring distributed session lock...")
+    if not lock_manager.acquire_lock(timeout=30):
+        logging.error("❌ Could not acquire distributed lock - another instance is using this session")
+        logging.error("   This prevents AUTH_KEY_DUPLICATED errors")
+        logging.error("   If you're sure no other instance is running, wait 5 minutes and try again")
+        release_singleton_lock()
+        raise SystemExit(4)  # Exit code 4 for "lock timeout"
+    
+    logging.info("✅ Distributed lock acquired successfully")
 
     try:
         await app.start()
@@ -268,8 +283,12 @@ async def main():
             logging.error(
                 "Primary account session is no longer valid. Re-authenticate the account via the dashboard."
             )
+            lock_manager.release_lock()
+            release_singleton_lock()
             raise SystemExit(2)  # Exit code 2 for auth_key_duplicated
         
+        lock_manager.release_lock()
+        release_singleton_lock()
         raise SystemExit(2)
     except (errors.NotAcceptable, errors.Unauthorized) as e:
         logging.error(
@@ -300,8 +319,12 @@ async def main():
             logging.error(
                 "Primary account session is no longer valid. Re-authenticate the account via the dashboard to restart the userbot."
             )
+            lock_manager.release_lock()
+            release_singleton_lock()
             raise SystemExit(1)
 
+        lock_manager.release_lock()
+        release_singleton_lock()
         restart()
 
     load_missing_modules()
@@ -359,6 +382,9 @@ async def main():
     await idle()
 
     await app.stop()
+    
+    # Release distributed lock
+    lock_manager.release_lock()
     release_singleton_lock()
 
 

@@ -138,6 +138,23 @@ def init_database():
             CREATE INDEX IF NOT EXISTS idx_profile_changes_account ON profile_changes(account_id, changed_at)
         """)
         
+        # Create distributed lock table for preventing AUTH_KEY_DUPLICATED
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS telegram_session_locks (
+                id SERIAL PRIMARY KEY,
+                account_id INTEGER UNIQUE NOT NULL,
+                locked_by INTEGER NOT NULL,
+                locked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (account_id) REFERENCES telegram_accounts(id) ON DELETE CASCADE
+            )
+        """)
+        
+        # Create index for faster stale lock cleanup
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_session_locks_locked_at 
+            ON telegram_session_locks(locked_at)
+        """)
+        
         conn.commit()
         cursor.close()
 
