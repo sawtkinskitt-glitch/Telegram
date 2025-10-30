@@ -1,0 +1,31 @@
+{
+  "name": "workspace",
+  "version": "1.0.0",
+  "description": "[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/sawtkinskitt-glitch/Telegram)",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sawtkinskitt-glitch/Telegram.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sawtkinskitt-glitch/Telegram/issues"
+  },
+  "homepage": "https://github.com/sawtkinskitt-glitch/Telegram#readme",
+  "devDependencies": {
+    "axe-core": "^4.11.0",
+    "eslint": "^9.38.0",
+    "html-validate": "^10.2.1",
+    "htmlhint": "^1.7.1",
+    "http-server": "^14.1.1",
+    "lighthouse": "^13.0.1",
+    "pa11y": "^9.0.1",
+    "prettier": "^3.6.2",
+    "stylelint": "^16.25.0"
+  }
+}
