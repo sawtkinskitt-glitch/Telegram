@@ -1,5 +1,15 @@
 # 🌕 Moon-Userbot
 
+## 🚀 Quick Deploy to Render
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/sawtkinskitt-glitch/Telegram)
+
+**One-click deployment ready!** See [RENDER_DEPLOY.md](RENDER_DEPLOY.md) for detailed instructions.
+
+---
+
+# 🌕 Moon-Userbot
+
 ![Moon-Userbot](https://telegra.ph/file/0c37c2fb0f194cc1c0344.jpg)
 
 [![Open Source Love](https://badges.frapsoft.com/os/v2/open-source.png?v=103)](https://github.com/The-MoonTg-project/Moon-Userbot)
