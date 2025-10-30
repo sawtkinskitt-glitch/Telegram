@@ -161,6 +161,19 @@ if kill -0 "$USERBOT_PID" 2>/dev/null; then
     echo "✅ Userbot initialized successfully!"
 else
     echo "❌ Userbot initialization failed"
+    echo "📋 Last 50 lines of userbot log:"
+    tail -50 /tmp/moonuserbot.log 2>/dev/null || echo "No log file found"
+    echo ""
+    echo "🔍 Checking for common issues..."
+    if grep -q "AUTH_KEY_DUPLICATED" /tmp/moonuserbot.log 2>/dev/null; then
+        echo "⚠️  AUTH_KEY_DUPLICATED detected - deployment overlap still occurring"
+    elif grep -q "DATABASE_URL" /tmp/moonuserbot.log 2>/dev/null; then
+        echo "⚠️  Database connection issue detected"
+    elif grep -q "STRINGSESSION" /tmp/moonuserbot.log 2>/dev/null; then
+        echo "⚠️  Session string issue detected"
+    else
+        echo "⚠️  Unknown initialization failure - check logs above"
+    fi
     exit 1
 fi
 
