@@ -1,11 +1,27 @@
-FROM python:3.11
+# Use slim Python image (saves ~600MB, faster pull)
+FROM python:3.11-slim
+
 WORKDIR /app
-COPY . /app
-RUN apt-get -qq update && apt-get -qq install -y git wget ffmpeg mediainfo \
- && apt-get clean \
- && rm -rf /var/lib/apt/lists/*
-RUN python -m venv --copies /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+
+# Install system dependencies in one layer (cached unless Dockerfile changes)
+RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
+    git \
+    wget \
+    ffmpeg \
+    mediainfo \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first (cached unless requirements.txt changes)
+COPY requirements.txt .
+
+# Install Python packages (cached unless requirements change)
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code (changes most frequently, so last)
+COPY . .
+
+# Make startup script executable
 RUN chmod +x cloud.sh
+
 CMD ["bash", "cloud.sh"]

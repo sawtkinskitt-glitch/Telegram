@@ -1,0 +1,91 @@
+# Node.js - NOT NEEDED for Python userbot (111MB waste!)
+node_modules/
+package.json
+package-lock.json
+*.log
+npm-debug.log*
+
+# Git files
+.git/
+.gitignore
+.gitattributes
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Documentation and markdown (not needed in container)
+*.md
+!README.md
+WORKER_EXIT_FIX_DOCUMENTATION.md
+WORKER_EXIT_FIX_SUMMARY.md
+ENV_REVIEW.md
+DEPLOYMENT*.md
+ANTI_BAN*.md
+FRONTEND*.md
+FIX_*.md
+GIT_*.md
+IMPLEMENTATION*.md
+FINAL_*.md
+RENDER_*.md
+
+# Test files
+test/
+tests/
+*.test.js
+*.spec.js
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+.cache/
+
+# Session files (should be in env vars)
+*.session
+*.session-journal
+
+# Logs
+logs/
+*.log
+moonlogs.txt
+
+# Other unnecessary files
+.env.example
+.editorconfig
+.prettierrc
+.eslintrc*
+render.yaml
+docker-compose.yml
+compose.yml
+Aptfile
+Cloudfile
+replit.md
+termux-install.sh
+install.py
+install.sh
+string_gen.py
+session_generator.py
+run_command.txt
+thumb.jpg
