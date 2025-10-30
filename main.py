@@ -137,7 +137,10 @@ async def main():
             e.__class__.__name__,
             e,
         )
-        os.rename("./my_account.session", "./my_account.session-old")
+        if os.path.exists("./my_account.session"):
+            os.rename("./my_account.session", "./my_account.session-old")
+        else:
+            logging.warning("Session file not found, creating fresh start...")
         restart()
 
     load_missing_modules()
@@ -151,8 +154,8 @@ async def main():
                 info["message_id"],
                 "<b>Loading modules...</b>",
             )
-        except errors.RPCError:
-            pass
+        except errors.RPCError as e:
+            logging.debug(f"Failed to edit message during module loading: {e}")
 
     await module_manager.load_modules(app)
 
@@ -173,8 +176,8 @@ async def main():
             )
         try:
             await app.edit_message_text(info["chat_id"], info["message_id"], text)
-        except errors.RPCError:
-            pass
+        except errors.RPCError as e:
+            logging.debug(f"Failed to edit message after restart: {e}")
         db.remove("core.updater", "restart_info")
 
     # required for sessionkiller module

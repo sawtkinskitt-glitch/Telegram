@@ -15,6 +15,7 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
+import re
 import sys
 import shutil
 import subprocess
@@ -29,6 +30,17 @@ from utils.scripts import format_exc, restart
 
 def check_command(command):
     return shutil.which(command) is not None
+
+
+def validate_package_name(package: str) -> bool:
+    """
+    Validate package name against PEP 508 naming conventions.
+    Returns True if package name is safe to use with pip.
+    """
+    if not package or not isinstance(package, str):
+        return False
+    package_pattern = re.compile(r'^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$')
+    return bool(package_pattern.match(package)) and len(package) <= 214
 
 
 @Client.on_message(filters.command("restart", prefix) & filters.me)
@@ -97,10 +109,12 @@ async def update(_, message: Message):
             )
 
         if requirements_list:
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install", "-U", *requirements_list],
-                check=True,
-            )
+            validated_packages = [pkg for pkg in requirements_list if validate_package_name(pkg)]
+            if validated_packages:
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-U", *validated_packages],
+                    check=True,
+                )
     except Exception as e:
         await message.edit(format_exc(e))
         db.remove("core.updater", "restart_info")

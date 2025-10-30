@@ -7,4 +7,5 @@ RUN apt-get -qq update && apt-get -qq install -y git wget ffmpeg mediainfo \
 RUN python -m venv --copies /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir -r requirements.txt
-CMD ["python", "main.py"]
+RUN chmod +x cloud.sh
+CMD ["bash", "cloud.sh"]

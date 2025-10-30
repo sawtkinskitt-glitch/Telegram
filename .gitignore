@@ -1,24 +1,72 @@
-.DS_Store
-.gitattributes
-.vscode
-/modules/__pycache__/
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Telegram session files
 *.session
-*.session-old
+*.session-journal
+my_account.session
+
+# Database
 *.db
+*.sqlite
 *.sqlite3
-*-journal
-/venv/
-.venv/
-/downloads/
-/modules/custom_modules
-.idea
-config.ini
-unknown_errors.txt
-moonlogs.txt
-thumb.jpg
-antipm_pic.jpg
-musicbot/
+db.sqlite3
+
+# Environment variables
 .env
-.trunk/
-previous_profiles/
+.env.local
+
+# Logs
+*.log
+moonlogs.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.zip
+*.tar.gz
+*.bak
+moon-userbot-backup.zip
+project-backup.tar.gz
+
+# User data
+attached_assets/
+Read.txt
+session.py
+
+# Temporary files
+tmp/
+temp/
