@@ -39,11 +39,15 @@
 #     "pySmartDL",
 # ]
 # ///
+import asyncio
 import logging
 import os
 import platform
 import sqlite3
 import subprocess
+import time
+import uuid
+from contextlib import suppress
 
 import requests
 from pyrogram import Client, errors, idle
@@ -52,7 +56,7 @@ from pyrogram.raw.functions.account import DeleteAccount, GetAuthorizations
 
 from utils import config
 from utils.db import db
-from db_manager import AccountManager
+from db_manager import AccountManager, SessionLockManager, init_database
 from encryption_service import EncryptionService
 from utils.misc import gitrepo, userbot_version
 from utils.module import ModuleManager
@@ -63,6 +67,8 @@ from utils.device_fingerprints import get_fingerprint_for_account
 SCRIPT_PATH = os.path.dirname(os.path.realpath(__file__))
 if SCRIPT_PATH != os.getcwd():
     os.chdir(SCRIPT_PATH)
+
+init_database()
 
 # Resolve session credentials
 ACCOUNT_SOURCE = "config"
@@ -150,6 +156,15 @@ common_params["in_memory"] = True
 app = Client("my_account", **common_params)
 
 
+INSTANCE_ID = os.environ.get("USERBOT_INSTANCE_ID") or f"{platform.node()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+SESSION_LOCK_WAIT_TIMEOUT = int(os.environ.get("USERBOT_SESSION_LOCK_WAIT", "180"))
+SESSION_LOCK_TTL = int(os.environ.get("USERBOT_SESSION_LOCK_TTL", "120"))
+SESSION_LOCK_POLL_INTERVAL = int(os.environ.get("USERBOT_SESSION_LOCK_POLL", "5"))
+SESSION_LOCK_HEARTBEAT_INTERVAL = int(
+    os.environ.get("USERBOT_SESSION_LOCK_HEARTBEAT", "30")
+)
+
+
 def load_missing_modules():
     all_modules = db.get("custom.modules", "allModules", [])
     if not all_modules:
@@ -196,101 +211,243 @@ async def main():
         account_id,
     )
 
-    try:
-        await app.start()
-    except sqlite3.OperationalError as e:
-        if str(e) == "database is locked" and os.name == "posix":
-            logging.warning(
-                "Session file is locked. Trying to kill blocking process..."
-            )
-            subprocess.run(["fuser", "-k", "my_account.session"], check=True)
-            restart()
-        raise
-    except (errors.NotAcceptable, errors.Unauthorized) as e:
-        logging.error(
-            "%s: %s\nMoving session file to my_account.session-old...",
-            e.__class__.__name__,
-            e,
-        )
-        if os.path.exists("./my_account.session"):
-            try:
-                os.rename("./my_account.session", "./my_account.session-old")
-            except FileNotFoundError:
-                logging.warning("Session file missing during cleanup; continuing")
-        else:
-            logging.warning("Session file not found, creating fresh start...")
+    lock_account_id = int(account_id or 0)
+    session_lock_acquired = False
+    heartbeat_task = None
+    app_started = False
 
-        if USING_DB_SESSION and PRIMARY_ACCOUNT_ID:
+    async def maintain_session_lock():
+        nonlocal session_lock_acquired
+        while session_lock_acquired:
             try:
-                AccountManager.clear_account_session(PRIMARY_ACCOUNT_ID, status="auth_error")
-                logging.error(
-                    "Cleared stored session for account ID %s due to authentication error.",
-                    PRIMARY_ACCOUNT_ID,
-                )
-            except Exception as cleanup_error:
-                logging.error("Failed to clear account session: %s", cleanup_error)
-            logging.error(
-                "Primary account session is no longer valid. Re-authenticate the account via the dashboard to restart the userbot."
+                await asyncio.sleep(max(SESSION_LOCK_HEARTBEAT_INTERVAL, 5))
+            except asyncio.CancelledError:
+                break
+
+            if SessionLockManager.refresh_session_lock(lock_account_id, INSTANCE_ID):
+                continue
+
+            logging.warning(
+                "Session lock refresh failed; attempting re-acquisition (instance %s)",
+                INSTANCE_ID,
             )
+
+            reacquired = False
+            deadline = time.monotonic() + SESSION_LOCK_WAIT_TIMEOUT
+            while time.monotonic() < deadline:
+                if SessionLockManager.try_acquire_session_lock(
+                    lock_account_id,
+                    INSTANCE_ID,
+                    ttl_seconds=SESSION_LOCK_TTL,
+                ):
+                    reacquired = True
+                    break
+
+                await asyncio.sleep(max(SESSION_LOCK_POLL_INTERVAL, 1))
+
+            if reacquired:
+                logging.info("Session lock re-acquired after refresh failure")
+                continue
+
+            logging.error(
+                "Could not refresh or re-acquire session lock; stopping to avoid duplicate sessions"
+            )
+            session_lock_acquired = False
+            await app.stop()
+            break
+
+    try:
+        try:
+            session_lock_acquired = SessionLockManager.acquire_session_lock(
+                lock_account_id,
+                INSTANCE_ID,
+                wait_timeout=SESSION_LOCK_WAIT_TIMEOUT,
+                poll_interval=SESSION_LOCK_POLL_INTERVAL,
+                ttl_seconds=SESSION_LOCK_TTL,
+            )
+        except Exception as lock_error:
+            logging.exception("Failed to acquire session lock: %s", lock_error)
             raise SystemExit(1)
 
-        restart()
+        if not session_lock_acquired:
+            holder = SessionLockManager.get_lock_holder(lock_account_id)
+            if holder:
+                logging.error(
+                    "Another instance (%s) is already managing this session (last heartbeat: %s). Deployment will exit.",
+                    holder.get("instance_id"),
+                    holder.get("heartbeat_at"),
+                )
+            else:
+                logging.error(
+                    "Failed to acquire session lock for account %s; exiting.",
+                    lock_account_id,
+                )
+            raise SystemExit(1)
 
-    load_missing_modules()
-    module_manager = ModuleManager.get_instance()
-    info = db.get("core.updater", "restart_info")
-
-    if info:
-        try:
-            await app.edit_message_text(
-                info["chat_id"],
-                info["message_id"],
-                "<b>Loading modules...</b>",
-            )
-        except errors.RPCError as e:
-            logging.debug(f"Failed to edit message during module loading: {e}")
-
-    await module_manager.load_modules(app)
-
-    if info:
-        text = {
-            "restart": "<b>Restart completed!</b>",
-            "update": "<b>Update process completed!</b>",
-        }[info["type"]]
-
-        if module_manager.failed_modules > 0:
-            failed_list = "\n".join(
-                [f"• <code>{m}</code>" for m in module_manager.failed_list]
-            )
-            text += (
-                f"\n\n[E] <b>Failed to load {module_manager.failed_modules} module(s):</b>\n"
-                f"{failed_list}\n\n"
-                "<i>Please check logs for more details.</i>"
-            )
-        try:
-            await app.edit_message_text(info["chat_id"], info["message_id"], text)
-        except errors.RPCError as e:
-            logging.debug(f"Failed to edit message after restart: {e}")
-        db.remove("core.updater", "restart_info")
-
-    # required for sessionkiller module
-    if db.get("core.sessionkiller", "enabled", False):
-        db.set(
-            "core.sessionkiller",
-            "auths_hashes",
-            [
-                auth.hash
-                for auth in (await app.invoke(GetAuthorizations())).authorizations
-            ],
+        logging.info(
+            "Session lock acquired for account %s (instance %s)",
+            lock_account_id,
+            INSTANCE_ID,
         )
 
-    logging.info("Moon-Userbot started!")
+        try:
+            await app.start()
+            app_started = True
+        except sqlite3.OperationalError as e:
+            if str(e) == "database is locked" and os.name == "posix":
+                logging.warning(
+                    "Session file is locked. Trying to kill blocking process..."
+                )
+                subprocess.run(["fuser", "-k", "my_account.session"], check=True)
+                SessionLockManager.release_session_lock(lock_account_id, INSTANCE_ID)
+                session_lock_acquired = False
+                restart()
+            raise
+        except errors.AuthKeyDuplicated as e:
+            logging.error(
+                "AuthKeyDuplicated: %s. This usually means another deployment is still using the same session.",
+                e,
+            )
 
-    app.loop.create_task(rentry_cleanup_job())
+            holder = SessionLockManager.get_lock_holder(lock_account_id)
+            if holder and holder.get("instance_id") != INSTANCE_ID:
+                logging.error(
+                    "Lock holder %s last heartbeat at %s",
+                    holder.get("instance_id"),
+                    holder.get("heartbeat_at"),
+                )
 
-    await idle()
+            if USING_DB_SESSION and PRIMARY_ACCOUNT_ID:
+                try:
+                    AccountManager.clear_account_session(
+                        PRIMARY_ACCOUNT_ID, status="auth_key_duplicated"
+                    )
+                    logging.error(
+                        "Cleared stored session for account ID %s due to duplicated auth key. Re-authentication required.",
+                        PRIMARY_ACCOUNT_ID,
+                    )
+                except Exception as cleanup_error:
+                    logging.error(
+                        "Failed to clear account session after auth key duplication: %s",
+                        cleanup_error,
+                    )
 
-    await app.stop()
+            logging.error(
+                "Terminating to avoid reusing a duplicated auth key. Ensure other deployments have fully stopped, then regenerate or reimport the session."
+            )
+
+            SessionLockManager.release_session_lock(lock_account_id, INSTANCE_ID)
+            session_lock_acquired = False
+            raise SystemExit(1)
+        except (errors.NotAcceptable, errors.Unauthorized) as e:
+            logging.error(
+                "%s: %s\nMoving session file to my_account.session-old...",
+                e.__class__.__name__,
+                e,
+            )
+            if os.path.exists("./my_account.session"):
+                try:
+                    os.rename("./my_account.session", "./my_account.session-old")
+                except FileNotFoundError:
+                    logging.warning("Session file missing during cleanup; continuing")
+            else:
+                logging.warning("Session file not found, creating fresh start...")
+
+            if USING_DB_SESSION and PRIMARY_ACCOUNT_ID:
+                try:
+                    AccountManager.clear_account_session(
+                        PRIMARY_ACCOUNT_ID, status="auth_error"
+                    )
+                    logging.error(
+                        "Cleared stored session for account ID %s due to authentication error.",
+                        PRIMARY_ACCOUNT_ID,
+                    )
+                except Exception as cleanup_error:
+                    logging.error("Failed to clear account session: %s", cleanup_error)
+                logging.error(
+                    "Primary account session is no longer valid. Re-authenticate the account via the dashboard to restart the userbot."
+                )
+                SessionLockManager.release_session_lock(lock_account_id, INSTANCE_ID)
+                session_lock_acquired = False
+                raise SystemExit(1)
+
+            SessionLockManager.release_session_lock(lock_account_id, INSTANCE_ID)
+            session_lock_acquired = False
+            restart()
+
+        load_missing_modules()
+        module_manager = ModuleManager.get_instance()
+        info = db.get("core.updater", "restart_info")
+
+        if info:
+            try:
+                await app.edit_message_text(
+                    info["chat_id"],
+                    info["message_id"],
+                    "<b>Loading modules...</b>",
+                )
+            except errors.RPCError as e:
+                logging.debug(f"Failed to edit message during module loading: {e}")
+
+        await module_manager.load_modules(app)
+
+        if info:
+            text = {
+                "restart": "<b>Restart completed!</b>",
+                "update": "<b>Update process completed!</b>",
+            }[info["type"]]
+
+            if module_manager.failed_modules > 0:
+                failed_list = "\n".join(
+                    [f"• <code>{m}</code>" for m in module_manager.failed_list]
+                )
+                text += (
+                    f"\n\n[E] <b>Failed to load {module_manager.failed_modules} module(s):</b>\n"
+                    f"{failed_list}\n\n"
+                    "<i>Please check logs for more details.</i>"
+                )
+            try:
+                await app.edit_message_text(info["chat_id"], info["message_id"], text)
+            except errors.RPCError as e:
+                logging.debug(f"Failed to edit message after restart: {e}")
+            db.remove("core.updater", "restart_info")
+
+        if session_lock_acquired:
+            heartbeat_task = app.loop.create_task(maintain_session_lock())
+
+        # required for sessionkiller module
+        if db.get("core.sessionkiller", "enabled", False):
+            db.set(
+                "core.sessionkiller",
+                "auths_hashes",
+                [
+                    auth.hash
+                    for auth in (await app.invoke(GetAuthorizations())).authorizations
+                ],
+            )
+
+        logging.info("Moon-Userbot started!")
+
+        app.loop.create_task(rentry_cleanup_job())
+
+        await idle()
+
+    finally:
+        if heartbeat_task:
+            heartbeat_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await heartbeat_task
+
+        if app_started and app.is_connected:
+            await app.stop()
+
+        if session_lock_acquired:
+            try:
+                SessionLockManager.release_session_lock(lock_account_id, INSTANCE_ID)
+            except Exception as release_error:
+                logging.error("Failed to release session lock: %s", release_error)
+            finally:
+                session_lock_acquired = False
 
 
 if __name__ == "__main__":

@@ -2,9 +2,10 @@
 Sync Telegram profile data (name, username, profile photo)
 """
 import asyncio
+import uuid
 from pyrogram import Client
 from encryption_service import EncryptionService
-from db_manager import AccountManager, get_db_connection
+from db_manager import AccountManager, SessionLockManager, get_db_connection
 
 class ProfileSyncService:
     """Sync profile data from Telegram"""
@@ -17,6 +18,24 @@ class ProfileSyncService:
         Returns:
             dict with updated profile data or error
         """
+        lock_instance_id = f"profile-sync-{account_id}-{uuid.uuid4().hex[:8]}"
+        lock_acquired = SessionLockManager.try_acquire_session_lock(
+            account_id,
+            lock_instance_id,
+            ttl_seconds=60,
+        )
+
+        if not lock_acquired:
+            holder = SessionLockManager.get_lock_holder(account_id)
+            message = "Userbot session is currently in use; try again after the running instance stops."
+            if holder:
+                message += f" Active instance: {holder.get('instance_id')} (last heartbeat {holder.get('heartbeat_at')})."
+            return {
+                'success': False,
+                'error': 'session_in_use',
+                'message': message.strip()
+            }
+
         try:
             client = Client(
                 f"sync_{phone}",
@@ -80,6 +99,10 @@ class ProfileSyncService:
                 'success': False,
                 'error': str(e)
             }
+        finally:
+            if lock_acquired:
+                SessionLockManager.release_session_lock(account_id, lock_instance_id)
+                lock_acquired = False
     
     @staticmethod
     def sync_account_profile_sync(account_id: int):

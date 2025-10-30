@@ -1,15 +1,41 @@
 services:
+    db:
+        image: postgres:15-alpine
+        container_name: moonuserbot-db
+        restart: unless-stopped
+        environment:
+            POSTGRES_DB: moonuserbot
+            POSTGRES_USER: moonuser
+            POSTGRES_PASSWORD: moonsecret
+        ports:
+            - "5432:5432"
+        volumes:
+            - db_data:/var/lib/postgresql/data
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U moonuser -d moonuserbot"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
     moonuserbot:
         build:
             context: .
             dockerfile: Dockerfile
         container_name: moonuserbot
         restart: unless-stopped
+        depends_on:
+            db:
+                condition: service_healthy
         env_file:
             - .env
+        ports:
+            - "8080:8080"
         networks:
             - default
 
 networks:
     default:
         external: false
+
+volumes:
+    db_data:
