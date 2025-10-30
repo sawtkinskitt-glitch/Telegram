@@ -2,13 +2,15 @@
 SafetyGuardian - Anti-Ban Protection System
 Production-grade rate limiting, FloodWait detection, and ban risk management
 """
-import time
+import json
 import random
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
+
+import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import os
 
 class SafetyGuardian:
     """Protect accounts from Telegram bans with intelligent rate limiting"""
@@ -22,6 +24,8 @@ class SafetyGuardian:
     
     def __init__(self):
         self.db_url = os.getenv('DATABASE_URL')
+        if not self.db_url:
+            raise RuntimeError("DATABASE_URL environment variable is required for SafetyGuardian")
         
     def _get_connection(self):
         """Get database connection"""
@@ -141,9 +145,10 @@ class SafetyGuardian:
                         risk_score += 15
                         warnings.append("New account (higher risk)")
                     
-                    if account['total_clones'] > 100:
+                    total_clones = account.get('total_clones') or 0
+                    if total_clones > 100:
                         risk_score += 10
-                        warnings.append(f"High lifetime usage ({account['total_clones']} total clones)")
+                        warnings.append(f"High lifetime usage ({total_clones} total clones)")
         
         # Cap at 100
         risk_score = min(100, risk_score)
@@ -167,11 +172,12 @@ class SafetyGuardian:
         """Record a clone attempt for tracking and analytics"""
         with self._get_connection() as conn:
             with conn.cursor() as cur:
+                elements_json = json.dumps(elements_cloned or [])
                 cur.execute("""
                     INSERT INTO clone_attempts 
                     (account_id, target_user, success, elements_cloned, error_message, attempted_at)
                     VALUES (%s, %s, %s, %s, %s, NOW())
-                """, (account_id, target_user, success, elements_cloned, error_message))
+                """, (account_id, target_user, success, elements_json, error_message))
                 
                 # Update account total clones
                 if success:
@@ -190,7 +196,7 @@ class SafetyGuardian:
                 # Record event
                 cur.execute("""
                     INSERT INTO flood_wait_events 
-                    (account_id, wait_seconds, operation, occurred_at)
+                    (account_id, wait_duration, operation_type, occurred_at)
                     VALUES (%s, %s, %s, NOW())
                 """, (account_id, wait_seconds, operation))
                 
@@ -275,5 +281,10 @@ class SafetyGuardian:
                     'total_floodwaits': account['flood_wait_count']
                 }
 
-# Singleton instance
+# Singleton instance and backwards-compatible factory helper
 guardian = SafetyGuardian()
+
+
+def create_guardian(_account_identifier: Optional[str] = None) -> SafetyGuardian:
+    """Maintain compatibility with older modules expecting a factory function."""
+    return guardian

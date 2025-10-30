@@ -1753,6 +1753,50 @@
         }
 
         /* Sparkline Charts */
+        .analytics-sparklines {
+            max-width: 980px;
+            margin: var(--spacing-xl) auto;
+            padding: 0 var(--spacing-lg);
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: var(--spacing-lg);
+        }
+
+        .sparkline-card {
+            background: var(--apple-white);
+            border-radius: var(--border-radius-large);
+            padding: var(--spacing-lg);
+            box-shadow: var(--shadow-sm);
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-md);
+        }
+
+        .sparkline-card h3 {
+            font-size: var(--text-sm);
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            color: var(--apple-gray-6);
+            text-transform: uppercase;
+        }
+
+        .sparkline-card .metric-value {
+            font-size: var(--text-2xl);
+            font-weight: 600;
+            color: var(--apple-black);
+            letter-spacing: -0.02em;
+        }
+
+        .sparkline-card canvas {
+            width: 100%;
+            height: 60px;
+        }
+
+        .sparkline-card .sparkline-footer {
+            font-size: var(--text-xs);
+            color: var(--apple-gray-5);
+        }
+
         .sparkline {
             width: 80px;
             height: 24px;
@@ -2373,6 +2417,28 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </section>
+
+    <!-- Global Analytics Sparklines -->
+    <section class="analytics-sparklines" id="analytics-sparklines" aria-label="Account activity overview">
+        <div class="sparkline-card">
+            <h3>Clone Operations (24h)</h3>
+            <div class="metric-value" id="clone-ops-total">0</div>
+            <canvas id="clone-ops-sparkline" width="240" height="60"></canvas>
+            <div class="sparkline-footer" id="clone-ops-footer">Hourly clone attempts across all accounts</div>
+        </div>
+        <div class="sparkline-card">
+            <h3>FloodWait Events (24h)</h3>
+            <div class="metric-value" id="floodwait-total">0</div>
+            <canvas id="floodwait-sparkline" width="240" height="60"></canvas>
+            <div class="sparkline-footer" id="floodwait-footer">FloodWait triggers by hour</div>
+        </div>
+        <div class="sparkline-card">
+            <h3>Ban Risk Trend (7d)</h3>
+            <div class="metric-value" id="ban-risk-average">0%</div>
+            <canvas id="ban-risk-sparkline" width="240" height="60"></canvas>
+            <div class="sparkline-footer" id="ban-risk-footer">Average daily ban risk score</div>
         </div>
     </section>
 
@@ -3035,16 +3101,19 @@
         // Load data with Apple-style smoothness
         async function loadData() {
             try {
-                const [commands, stats] = await Promise.all([
+                const [commands, stats, timeseries] = await Promise.all([
                     fetch('/api/commands').then(r => r.json()),
-                    fetch('/api/stats').then(r => r.json())
+                    fetch('/api/stats').then(r => r.json()),
+                    fetch('/api/stats/timeseries').then(r => r.json())
                 ]);
                 
                 commandsData = commands;
                 updateStats(stats);
+                renderGlobalSparklines(timeseries);
                 renderCategoryFilters();
                 renderCommands();
             } catch (error) {
+                console.error('Failed to load dashboard data:', error);
                 showError();
             }
         }
@@ -3055,6 +3124,79 @@
             document.getElementById('safe-count').textContent = stats.safety_breakdown.safe;
             document.getElementById('moderate-count').textContent = stats.safety_breakdown.moderate;
             document.getElementById('risky-count').textContent = stats.safety_breakdown.risky;
+        }
+
+        function renderGlobalSparklines(timeseries) {
+            if (!timeseries || timeseries.success === false) {
+                drawSparkline('clone-ops-sparkline', [], '#007AFF');
+                drawSparkline('floodwait-sparkline', [], '#FF3B30');
+                drawSparkline('ban-risk-sparkline', [], '#AF52DE');
+                return;
+            }
+
+            const cloneSeries = (timeseries.clones_last_hours || []).map(point => point.count || 0);
+            const floodSeries = (timeseries.floodwaits_last_hours || []).map(point => point.count || 0);
+            const riskSeries = (timeseries.ban_risk_daily || []).map(point => point.score || 0);
+
+            const cloneTotal = cloneSeries.reduce((sum, value) => sum + value, 0);
+            const floodTotal = floodSeries.reduce((sum, value) => sum + value, 0);
+            const avgRisk = riskSeries.length ? (riskSeries.reduce((sum, value) => sum + value, 0) / riskSeries.length) : 0;
+
+            document.getElementById('clone-ops-total').textContent = cloneTotal;
+            document.getElementById('floodwait-total').textContent = floodTotal;
+            document.getElementById('ban-risk-average').textContent = `${avgRisk.toFixed(1)}%`;
+
+            drawSparkline('clone-ops-sparkline', cloneSeries, '#007AFF');
+            drawSparkline('floodwait-sparkline', floodSeries, '#FF3B30');
+            drawSparkline('ban-risk-sparkline', riskSeries, '#AF52DE');
+        }
+
+        function drawSparkline(canvasId, dataPoints, color) {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) return;
+
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+
+            ctx.clearRect(0, 0, width, height);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+
+            if (!dataPoints || dataPoints.length === 0) {
+                ctx.moveTo(0, height / 2);
+                ctx.lineTo(width, height / 2);
+                ctx.stroke();
+                return;
+            }
+
+            const max = Math.max(...dataPoints);
+            const min = Math.min(...dataPoints);
+            const range = max - min || 1;
+            const step = dataPoints.length === 1 ? width : width / (dataPoints.length - 1);
+
+            dataPoints.forEach((value, index) => {
+                const x = index * step;
+                const normalized = (value - min) / range;
+                const y = height - (normalized * height);
+                if (index === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            });
+
+            ctx.stroke();
+        }
+
+        async function refreshGlobalTimeseries() {
+            try {
+                const data = await fetch('/api/stats/timeseries').then(r => r.json());
+                renderGlobalSparklines(data);
+            } catch (error) {
+                console.error('Failed to refresh analytics sparklines:', error);
+            }
         }
 
         function renderCategoryFilters() {
@@ -3581,6 +3723,10 @@
                     const riskScore = account.ban_risk_score || 0;
                     const riskClass = riskScore < 30 ? 'low' : riskScore < 70 ? 'medium' : 'high';
                     const riskLabel = riskScore < 30 ? 'Low Risk' : riskScore < 70 ? 'Medium Risk' : 'High Risk';
+                    const toggleTitle = account.is_active ? 'Deactivate account' : 'Activate account';
+                    const toggleIcon = account.is_active ? '⏸️' : '▶️';
+                    const primaryIcon = account.is_primary ? '⭐' : '☆';
+                    const primaryTitle = account.is_primary ? 'Primary account' : 'Set as primary';
                     
                     return `
                         <div class="account-card">
@@ -3590,6 +3736,8 @@
                                     <div class="account-card-phone">${account.phone}</div>
                                 </div>
                                 <div class="account-card-actions">
+                                    <button class="account-action-btn" data-action="toggle" data-id="${account.id}" title="${toggleTitle}">${toggleIcon}</button>
+                                    <button class="account-action-btn" data-action="set-primary" data-id="${account.id}" title="${primaryTitle}">${primaryIcon}</button>
                                     <button class="account-action-btn" data-action="delete" data-id="${account.id}" title="Delete">🗑️</button>
                                 </div>
                             </div>
@@ -3614,9 +3762,22 @@
                     `;
                 }).join('');
                 
-                gridEl.querySelectorAll('[data-action="delete"]').forEach(btn => {
+                gridEl.querySelectorAll('.account-action-btn').forEach(btn => {
                     btn.addEventListener('click', () => {
-                        this.deleteAccount(parseInt(btn.dataset.id));
+                        const accountId = parseInt(btn.dataset.id);
+                        switch (btn.dataset.action) {
+                            case 'delete':
+                                this.deleteAccount(accountId);
+                                break;
+                            case 'toggle':
+                                this.toggleAccount(accountId);
+                                break;
+                            case 'set-primary':
+                                this.setPrimaryAccount(accountId);
+                                break;
+                            default:
+                                break;
+                        }
                     });
                 });
             },
@@ -3757,7 +3918,7 @@
                 }
                 
                 try {
-                    const response = await fetch(`/api/accounts/${accountId}`, {
+                    const response = await fetch(`/api/account/delete/${accountId}`, {
                         method: 'DELETE'
                     });
                     const result = await response.json();
@@ -3767,9 +3928,43 @@
                             this.currentAccount = null;
                             document.getElementById('current-account-name').textContent = 'Accounts';
                         }
+                    } else {
+                        alert(result.error || 'Failed to delete account');
                     }
                 } catch (error) {
                     alert('Failed to delete account: ' + error.message);
+                }
+            },
+
+            async toggleAccount(accountId) {
+                try {
+                    const response = await fetch(`/api/account/${accountId}/toggle`, {
+                        method: 'PATCH'
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        await this.loadAccounts();
+                    } else {
+                        alert(result.error || 'Failed to toggle account');
+                    }
+                } catch (error) {
+                    alert('Failed to toggle account: ' + error.message);
+                }
+            },
+
+            async setPrimaryAccount(accountId) {
+                try {
+                    const response = await fetch(`/api/account/${accountId}/set-primary`, {
+                        method: 'PATCH'
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        await this.loadAccounts();
+                    } else {
+                        alert(result.error || 'Failed to set primary account');
+                    }
+                } catch (error) {
+                    alert('Failed to set primary account: ' + error.message);
                 }
             },
             
@@ -3893,6 +4088,7 @@
             filter: 'all',
             searchTerm: '',
             refreshInterval: null,
+            activityByAccount: {},
 
             open() {
                 document.getElementById('operations-cockpit').classList.add('active');
@@ -3911,11 +4107,25 @@
                     const data = await response.json();
                     if (data.success) {
                         this.accounts = data.accounts;
+                        await this.loadActivity();
                         this.renderTable();
                         this.updateTicker();
                     }
                 } catch (error) {
                     console.error('Failed to load accounts:', error);
+                }
+            },
+
+            async loadActivity(hours = 24) {
+                try {
+                    const response = await fetch(`/api/accounts/activity?hours=${hours}`);
+                    const data = await response.json();
+                    if (data.success) {
+                        this.activityByAccount = data.activity || {};
+                    }
+                } catch (error) {
+                    console.error('Failed to load activity data:', error);
+                    this.activityByAccount = {};
                 }
             },
 
@@ -3941,6 +4151,11 @@
                     const isSelected = this.selectedAccount === account.id ? 'selected' : '';
                     const floodWaitCount = account.flood_wait_count || 0;
                     const cloneCount = account.total_clones || 0;
+                    const activity = this.activityByAccount[String(account.id)] || { clones: [], flood_waits: [] };
+                    const toggleIcon = account.is_active ? '⏸️' : '▶️';
+                    const toggleTitle = account.is_active ? 'Deactivate account' : 'Activate account';
+                    const primaryIcon = account.is_primary ? '⭐' : '☆';
+                    const primaryTitle = account.is_primary ? 'Primary account' : 'Set as primary';
 
                     return `
                         <div class="account-row ${isSelected}" data-account-id="${account.id}" data-index="${index}">
@@ -3973,6 +4188,8 @@
                             <div class="inline-actions">
                                 <button class="action-icon" title="Run command">⚡</button>
                                 <button class="action-icon" title="View health">📊</button>
+                                <button class="action-icon" data-action="toggle" data-id="${account.id}" title="${toggleTitle}">${toggleIcon}</button>
+                                <button class="action-icon" data-action="set-primary" data-id="${account.id}" title="${primaryTitle}">${primaryIcon}</button>
                                 <button class="action-icon" data-action="delete" data-id="${account.id}" title="Delete">🗑️</button>
                             </div>
                         </div>
@@ -3988,10 +4205,23 @@
                     });
                 });
 
-                table.querySelectorAll('[data-action="delete"]').forEach(btn => {
+                table.querySelectorAll('[data-action]').forEach(btn => {
                     btn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        this.deleteAccount(parseInt(btn.dataset.id));
+                        const accountId = parseInt(btn.dataset.id);
+                        switch (btn.dataset.action) {
+                            case 'delete':
+                                this.deleteAccount(accountId);
+                                break;
+                            case 'toggle':
+                                this.toggleAccount(accountId);
+                                break;
+                            case 'set-primary':
+                                this.setPrimaryAccount(accountId);
+                                break;
+                            default:
+                                break;
+                        }
                     });
                 });
 
@@ -4008,24 +4238,30 @@
                     canvas.width = 80;
                     canvas.height = 24;
 
-                    // Generate sample data (in real app, use actual historical data)
-                    const dataPoints = Array.from({length: 12}, () => Math.random() * 100);
+                    const activity = this.activityByAccount[String(account.id)];
+                    const dataPoints = activity ? activity.clones.map(point => point.count) : [];
                     
                     const max = Math.max(...dataPoints);
                     const min = Math.min(...dataPoints);
-                    const range = max - min || 1;
+                    const hasData = dataPoints.length > 0;
+                    const range = hasData ? (max - min || 1) : 1;
 
                     ctx.clearRect(0, 0, 80, 24);
                     ctx.strokeStyle = account.ban_risk_score > 50 ? '#FF3B30' : '#34C759';
                     ctx.lineWidth = 1.5;
                     ctx.beginPath();
 
-                    dataPoints.forEach((val, i) => {
-                        const x = (i / (dataPoints.length - 1)) * 80;
-                        const y = 24 - ((val - min) / range) * 24;
-                        if (i === 0) ctx.moveTo(x, y);
-                        else ctx.lineTo(x, y);
-                    });
+                    if (hasData) {
+                        dataPoints.forEach((val, i) => {
+                            const x = dataPoints.length === 1 ? 80 : (i / (dataPoints.length - 1)) * 80;
+                            const y = 24 - ((val - min) / range) * 24;
+                            if (i === 0) ctx.moveTo(x, y);
+                            else ctx.lineTo(x, y);
+                        });
+                    } else {
+                        ctx.moveTo(0, 12);
+                        ctx.lineTo(80, 12);
+                    }
 
                     ctx.stroke();
                 });
@@ -4080,7 +4316,7 @@
                 if (!confirm('Delete this account? This cannot be undone.')) return;
 
                 try {
-                    const response = await fetch(`/api/accounts/${accountId}`, { method: 'DELETE' });
+                    const response = await fetch(`/api/account/delete/${accountId}`, { method: 'DELETE' });
                     const result = await response.json();
                     if (result.success) {
                         await this.loadAccounts();
@@ -4089,9 +4325,39 @@
                             document.getElementById('selected-account-panel').style.display = 'none';
                             document.getElementById('rail-subtitle').textContent = 'Select an account to begin';
                         }
+                    } else {
+                        alert(result.error || 'Failed to delete account');
                     }
                 } catch (error) {
                     alert('Failed to delete account: ' + error.message);
+                }
+            },
+
+            async toggleAccount(accountId) {
+                try {
+                    const response = await fetch(`/api/account/${accountId}/toggle`, { method: 'PATCH' });
+                    const result = await response.json();
+                    if (result.success) {
+                        await this.loadAccounts();
+                    } else {
+                        alert(result.error || 'Failed to toggle account');
+                    }
+                } catch (error) {
+                    alert('Failed to toggle account: ' + error.message);
+                }
+            },
+
+            async setPrimaryAccount(accountId) {
+                try {
+                    const response = await fetch(`/api/account/${accountId}/set-primary`, { method: 'PATCH' });
+                    const result = await response.json();
+                    if (result.success) {
+                        await this.loadAccounts();
+                    } else {
+                        alert(result.error || 'Failed to set primary account');
+                    }
+                } catch (error) {
+                    alert('Failed to set primary account: ' + error.message);
                 }
             },
 
@@ -4348,6 +4614,7 @@
         // Initialize
         CommandPalette.init();
         loadData();
+        setInterval(refreshGlobalTimeseries, 30000);
     </script>
 
     <!-- 🛡️ ANTI-BAN SYSTEM JAVASCRIPT -->

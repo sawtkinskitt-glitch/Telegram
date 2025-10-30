@@ -1,3 +1,10 @@
+databases:
+  - name: moon-userbot-db
+    databaseName: moonuserbot
+    user: moonuser
+    plan: free
+    region: oregon
+
 services:
   - type: web
     name: moon-userbot
@@ -15,9 +22,9 @@ services:
       - key: ACCOUNT_ENCRYPTION_KEY
         value: dNRrRCAo3dvqTDteLSDTCOkaA9AU3xxOtpDUK2o26ZI=
       - key: DATABASE_TYPE
-        value: sqlite3
+        value: postgres
       - key: DATABASE_NAME
-        value: db.sqlite3
+        value: moonuserbot
       - key: PM_LIMIT
         value: 4
       - key: APIFLASH_KEY
@@ -33,4 +40,6 @@ services:
       - key: SECOND_SESSION
         value: ""
       - key: DATABASE_URL
-        value: ""
+        fromDatabase:
+          name: moon-userbot-db
+          property: connectionString

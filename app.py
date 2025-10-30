@@ -1,5 +1,11 @@
 from flask import Flask, render_template, jsonify, request
-from db_manager import AccountManager, SafetyMetricsManager, init_database, get_db_connection
+from db_manager import (
+    AccountManager,
+    SafetyMetricsManager,
+    AnalyticsManager,
+    init_database,
+    get_db_connection,
+)
 from utils.safety_guardian import guardian
 import os
 from datetime import datetime
@@ -135,6 +141,19 @@ def get_stats():
             'version': '2.5.0'
         }), 500
 
+
+@app.route('/api/stats/timeseries')
+def get_timeseries():
+    """Return aggregated dashboard timeseries data"""
+    try:
+        hours = request.args.get('hours', 24, type=int)
+        days = request.args.get('days', 7, type=int)
+        data = AnalyticsManager.get_global_timeseries(hours=hours, days=days)
+        return jsonify({'success': True, **data})
+    except Exception as e:
+        print(f"Error in /api/stats/timeseries: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/accounts')
 def get_accounts():
     """Get all accounts with health metrics"""
@@ -145,6 +164,17 @@ def get_accounts():
             'accounts': accounts,
             'count': len(accounts)
         })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/accounts/activity')
+def get_account_activity():
+    """Get per-account activity timeseries for clones and flood waits"""
+    try:
+        hours = request.args.get('hours', 24, type=int)
+        data = AnalyticsManager.get_accounts_activity(hours=hours)
+        return jsonify({'success': True, **data})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -342,7 +372,7 @@ def delete_account_by_id(account_id):
         if not account:
             return jsonify({'success': False, 'error': 'Account not found'}), 404
         
-        AccountManager.delete_account(account['phone'])
+        AccountManager.delete_account_by_id(account_id)
         return jsonify({'success': True, 'message': 'Account deleted successfully'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

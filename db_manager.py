@@ -1,10 +1,14 @@
 import os
+from collections import defaultdict
+from contextlib import contextmanager
+from datetime import datetime, timedelta
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from contextlib import contextmanager
-from datetime import datetime
 
 DATABASE_URL = os.getenv('DATABASE_URL')
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is required for PostgreSQL access")
 
 @contextmanager
 def get_db_connection():
@@ -40,6 +44,7 @@ def init_database():
                 account_status VARCHAR(50) DEFAULT 'active',
                 flood_wait_until TIMESTAMP,
                 flood_wait_count INTEGER DEFAULT 0,
+                total_clones INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -107,6 +112,21 @@ def init_database():
                 FOREIGN KEY (account_id) REFERENCES telegram_accounts(id) ON DELETE CASCADE
             )
         """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS account_risk_history (
+                id SERIAL PRIMARY KEY,
+                account_id INTEGER NOT NULL,
+                ban_risk_score INTEGER NOT NULL,
+                snapshot_date DATE NOT NULL,
+                recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (account_id) REFERENCES telegram_accounts(id) ON DELETE CASCADE,
+                UNIQUE (account_id, snapshot_date)
+            )
+        """)
+
+        cursor.execute("""ALTER TABLE telegram_accounts
+                          ADD COLUMN IF NOT EXISTS total_clones INTEGER DEFAULT 0""")
         
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_flood_wait_account ON flood_wait_events(account_id, occurred_at)
@@ -241,6 +261,14 @@ class AccountManager:
             cursor.execute("DELETE FROM telegram_accounts WHERE phone = %s", (phone,))
             cursor.close()
 
+    @staticmethod
+    def delete_account_by_id(account_id):
+        """Delete account by database ID"""
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM telegram_accounts WHERE id = %s", (account_id,))
+            cursor.close()
+
 class SafetyMetricsManager:
     """Manage safety metrics and reports - aligned with existing schema"""
     
@@ -285,11 +313,21 @@ class SafetyMetricsManager:
             profile_changes_24h = cursor.fetchone()
             
             cursor.close()
+
+            floodwait_events = []
+            if recent_floodwaits:
+                for row in recent_floodwaits:
+                    event = dict(row)
+                    if 'wait_duration' in event:
+                        event['wait_seconds'] = event.pop('wait_duration')
+                    if 'operation_type' in event:
+                        event['operation'] = event.pop('operation_type')
+                    floodwait_events.append(event)
             
             return {
                 'metrics': dict(metrics) if metrics else None,
                 'clone_stats': dict(clone_stats) if clone_stats else {'total': 0, 'successful': 0},
-                'recent_floodwaits': [dict(row) for row in recent_floodwaits] if recent_floodwaits else [],
+                'recent_floodwaits': floodwait_events,
                 'profile_changes_24h': dict(profile_changes_24h)['count'] if profile_changes_24h else 0
             }
     
@@ -311,7 +349,16 @@ class SafetyMetricsManager:
             """, (account_id,))
             events = cursor.fetchall()
             cursor.close()
-            return [dict(row) for row in events]
+
+            serialized = []
+            for row in events:
+                event = dict(row)
+                if 'wait_duration' in event:
+                    event['wait_seconds'] = event.pop('wait_duration')
+                if 'operation_type' in event:
+                    event['operation'] = event.pop('operation_type')
+                serialized.append(event)
+            return serialized
     
     @staticmethod
     def upsert_safety_metrics(account_id, ban_risk_score, clones_last_hour, clones_last_day, profile_changes_last_day, last_flood_wait=None):
@@ -330,7 +377,171 @@ class SafetyMetricsManager:
                     last_flood_wait = EXCLUDED.last_flood_wait,
                     calculated_at = CURRENT_TIMESTAMP
             """, (account_id, ban_risk_score, clones_last_hour, clones_last_day, profile_changes_last_day, last_flood_wait))
+
+            cursor.execute("""
+                INSERT INTO account_risk_history (account_id, ban_risk_score, snapshot_date)
+                VALUES (%s, %s, CURRENT_DATE)
+                ON CONFLICT (account_id, snapshot_date) DO UPDATE
+                SET ban_risk_score = EXCLUDED.ban_risk_score,
+                    recorded_at = CURRENT_TIMESTAMP
+            """, (account_id, ban_risk_score))
             cursor.close()
+
+
+class AnalyticsManager:
+    """Provide aggregated analytics for dashboards and sparklines"""
+
+    @staticmethod
+    def _generate_hour_buckets(hours: int):
+        end = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+        return [end - timedelta(hours=i) for i in reversed(range(hours))]
+
+    @staticmethod
+    def _generate_day_buckets(days: int):
+        end = datetime.utcnow().date()
+        return [end - timedelta(days=i) for i in reversed(range(days))]
+
+    @staticmethod
+    def get_accounts_activity(hours: int = 24):
+        """Return per-account clone and FloodWait counts grouped hourly"""
+        interval = f"{hours} hours"
+        buckets = AnalyticsManager._generate_hour_buckets(hours)
+
+        with get_db_connection() as conn:
+            accounts_cursor = conn.cursor()
+            accounts_cursor.execute("SELECT id FROM telegram_accounts")
+            account_rows = accounts_cursor.fetchall()
+            accounts_cursor.close()
+
+            clone_cursor = conn.cursor()
+            clone_cursor.execute(
+                """
+                SELECT account_id, date_trunc('hour', attempted_at) AS bucket, COUNT(*)
+                FROM clone_attempts
+                WHERE attempted_at >= NOW() - INTERVAL %s
+                GROUP BY account_id, bucket
+                """,
+                (interval,),
+            )
+            clone_rows = clone_cursor.fetchall()
+            clone_cursor.close()
+
+            flood_cursor = conn.cursor()
+            flood_cursor.execute(
+                """
+                SELECT account_id, date_trunc('hour', occurred_at) AS bucket, COUNT(*)
+                FROM flood_wait_events
+                WHERE occurred_at >= NOW() - INTERVAL %s
+                GROUP BY account_id, bucket
+                """,
+                (interval,),
+            )
+            flood_rows = flood_cursor.fetchall()
+            flood_cursor.close()
+
+        clone_map = defaultdict(dict)
+        for account_id, bucket, count in clone_rows:
+            clone_map[account_id][bucket.replace(minute=0, second=0, microsecond=0)] = count
+
+        flood_map = defaultdict(dict)
+        for account_id, bucket, count in flood_rows:
+            flood_map[account_id][bucket.replace(minute=0, second=0, microsecond=0)] = count
+
+        account_ids = [row[0] for row in account_rows]
+        activity = {}
+        for account_id in account_ids:
+            clones_series = []
+            floods_series = []
+            for bucket in buckets:
+                clones_series.append({
+                    "timestamp": bucket.isoformat() + "Z",
+                    "count": clone_map[account_id].get(bucket, 0),
+                })
+                floods_series.append({
+                    "timestamp": bucket.isoformat() + "Z",
+                    "count": flood_map[account_id].get(bucket, 0),
+                })
+            activity[str(account_id)] = {
+                "clones": clones_series,
+                "flood_waits": floods_series,
+            }
+
+        return {
+            "hours": hours,
+            "activity": activity,
+        }
+
+    @staticmethod
+    def get_global_timeseries(hours: int = 24, days: int = 7):
+        """Return aggregated timeseries for dashboard sparklines"""
+        hours_interval = f"{hours} hours"
+        clones_buckets = AnalyticsManager._generate_hour_buckets(hours)
+        days_buckets = AnalyticsManager._generate_day_buckets(days)
+
+        with get_db_connection() as conn:
+            clone_cursor = conn.cursor()
+            clone_cursor.execute(
+                """
+                SELECT date_trunc('hour', attempted_at) AS bucket, COUNT(*)
+                FROM clone_attempts
+                WHERE attempted_at >= NOW() - INTERVAL %s
+                GROUP BY bucket
+                """,
+                (hours_interval,),
+            )
+            clone_rows = clone_cursor.fetchall()
+            clone_cursor.close()
+
+            flood_cursor = conn.cursor()
+            flood_cursor.execute(
+                """
+                SELECT date_trunc('hour', occurred_at) AS bucket, COUNT(*)
+                FROM flood_wait_events
+                WHERE occurred_at >= NOW() - INTERVAL %s
+                GROUP BY bucket
+                """,
+                (hours_interval,),
+            )
+            flood_rows = flood_cursor.fetchall()
+            flood_cursor.close()
+
+            risk_cursor = conn.cursor()
+            risk_cursor.execute(
+                """
+                SELECT snapshot_date, AVG(ban_risk_score)::numeric(10,2)
+                FROM account_risk_history
+                WHERE snapshot_date >= CURRENT_DATE - %s::integer
+                GROUP BY snapshot_date
+                """,
+                (days,),
+            )
+            risk_rows = risk_cursor.fetchall()
+            risk_cursor.close()
+
+        clone_series_map = {bucket.replace(minute=0, second=0, microsecond=0): count for bucket, count in clone_rows}
+        flood_series_map = {bucket.replace(minute=0, second=0, microsecond=0): count for bucket, count in flood_rows}
+        risk_series_map = {snapshot: float(score) for snapshot, score in risk_rows}
+
+        clones_series = [
+            {"timestamp": bucket.isoformat() + "Z", "count": clone_series_map.get(bucket, 0)}
+            for bucket in clones_buckets
+        ]
+
+        floods_series = [
+            {"timestamp": bucket.isoformat() + "Z", "count": flood_series_map.get(bucket, 0)}
+            for bucket in clones_buckets
+        ]
+
+        risk_series = [
+            {"date": bucket.isoformat(), "score": risk_series_map.get(bucket, 0.0)}
+            for bucket in days_buckets
+        ]
+
+        return {
+            "clones_last_hours": clones_series,
+            "floodwaits_last_hours": floods_series,
+            "ban_risk_daily": risk_series,
+        }
 
 if __name__ == '__main__':
     print("Initializing database schema...")

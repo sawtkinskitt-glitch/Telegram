@@ -57,9 +57,9 @@
  - `API_ID` - Get it from [my.telegram.org](https://my.telegram.org/)
  - `API_HASH` - Get it from [my.telegram.org](https://my.telegram.org/)
  - `PM_LIMIT` - set your pm permit warn limit
- - `DATABASE_URL` - ONLY for MongoDB, your mongodb url
- - `DATABASE_NAME` - set to `db.sqlite3` if want to use sqlite3 db else leave blank
- - `DATABASE_TYPE` - set to `sqlite3` if want to use sqlite3 db else leave blank
+ - `DATABASE_URL` - PostgreSQL connection string (auto-populated on Render via `render.yaml`)
+ - `DATABASE_NAME` - Logical database name (defaults to the name embedded in `DATABASE_URL`)
+ - `DATABASE_TYPE` - defaults to `postgres`; set to `sqlite3` **only** for local development
 
 ### ⛺ Optional Vars
  
