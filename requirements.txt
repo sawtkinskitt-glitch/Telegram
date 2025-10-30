@@ -20,3 +20,4 @@ pySmartDL
 cryptography
 numpy
 psycopg2-binary
+flask-cors

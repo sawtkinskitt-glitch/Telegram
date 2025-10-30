@@ -1,4 +1,5 @@
 from flask import Flask, render_template, jsonify, request
+from flask_cors import CORS
 import os
 from datetime import datetime
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -38,6 +39,25 @@ except ImportError as e:
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(24).hex())
+
+# Configure CORS for Netlify frontend
+CORS(app, resources={
+    r"/api/*": {
+        "origins": [
+            "https://*.netlify.app",
+            "https://*.netlify.com", 
+            "http://localhost:*",
+            "http://127.0.0.1:*"
+        ],
+        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
+    },
+    r"/health/*": {
+        "origins": "*",
+        "methods": ["GET"]
+    }
+})
 
 ENCRYPTION_KEY = os.environ.get('ACCOUNT_ENCRYPTION_KEY')
 DATABASE_AVAILABLE = False
