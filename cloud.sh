@@ -22,22 +22,56 @@ Please see < https://github.com/The-MoonTg-project/Moon-Userbot/blob/main/LICENS
 All rights reserved.
 EOF
 
-# Cleanup function
+# Enhanced cleanup function with graceful Telegram disconnect
 cleanup() {
-    echo "🧹 Cleaning up..."
-    rm -f "$LOCKFILE" "$USERBOT_PID_FILE" "$GUNICORN_PID_FILE"
+    echo "🧹 Graceful shutdown initiated..."
     
+    # Step 1: Stop userbot FIRST with graceful shutdown
     if [ -n "$USERBOT_PID" ] && kill -0 "$USERBOT_PID" 2>/dev/null; then
-        echo "Stopping userbot (PID: $USERBOT_PID)..."
-        kill "$USERBOT_PID" 2>/dev/null || true
-        wait "$USERBOT_PID" 2>/dev/null || true
+        echo "📱 Sending graceful shutdown signal to userbot (PID: $USERBOT_PID)..."
+        kill -TERM "$USERBOT_PID" 2>/dev/null || true
+        
+        # Give userbot 15 seconds to gracefully disconnect from Telegram
+        echo "⏳ Waiting for Telegram disconnect (15s timeout)..."
+        for i in {1..15}; do
+            if ! kill -0 "$USERBOT_PID" 2>/dev/null; then
+                echo "✅ Userbot disconnected gracefully after ${i}s"
+                break
+            fi
+            sleep 1
+        done
+        
+        # Force kill if still running after timeout
+        if kill -0 "$USERBOT_PID" 2>/dev/null; then
+            echo "⚠️  Userbot didn't stop gracefully, force killing..."
+            kill -9 "$USERBOT_PID" 2>/dev/null || true
+            wait "$USERBOT_PID" 2>/dev/null || true
+        fi
     fi
     
+    # Step 2: Stop gunicorn
     if [ -n "$GUNICORN_PID" ] && kill -0 "$GUNICORN_PID" 2>/dev/null; then
-        echo "Stopping gunicorn (PID: $GUNICORN_PID)..."
-        kill "$GUNICORN_PID" 2>/dev/null || true
-        wait "$GUNICORN_PID" 2>/dev/null || true
+        echo "🌐 Stopping web server (PID: $GUNICORN_PID)..."
+        kill -TERM "$GUNICORN_PID" 2>/dev/null || true
+        
+        # Wait up to 5 seconds for gunicorn
+        for i in {1..5}; do
+            if ! kill -0 "$GUNICORN_PID" 2>/dev/null; then
+                echo "✅ Web server stopped after ${i}s"
+                break
+            fi
+            sleep 1
+        done
+        
+        # Force kill if needed
+        if kill -0 "$GUNICORN_PID" 2>/dev/null; then
+            kill -9 "$GUNICORN_PID" 2>/dev/null || true
+        fi
     fi
+    
+    # Step 3: Cleanup files
+    rm -f "$LOCKFILE" "$USERBOT_PID_FILE" "$GUNICORN_PID_FILE"
+    echo "✅ Shutdown complete"
 }
 
 trap cleanup EXIT INT TERM
@@ -57,6 +91,15 @@ fi
 echo $$ > "$LOCKFILE"
 
 echo "🚀 Starting Moon-Userbot..."
+
+# Add startup delay to prevent race conditions with overlapping deployments
+# This gives the old container time to disconnect from Telegram
+if [ "$RENDER" = "true" ] || [ -n "$RENDER_SERVICE_ID" ]; then
+    echo "☁️  Detected Render environment"
+    echo "⏳ Applying 5-second startup delay to prevent deployment overlap..."
+    sleep 5
+    echo "✅ Startup delay complete"
+fi
 
 # Start userbot in background with logging
 python main.py > /tmp/moonuserbot.log 2>&1 &
@@ -80,11 +123,25 @@ while [ $WAITED -lt $MAX_WAIT ]; do
         if [ "$EXIT_CODE" = "2" ]; then
             echo ""
             echo "🚨 AUTH_KEY_DUPLICATED ERROR DETECTED!"
-            echo "   This means another instance is using the same session."
-            echo "   Possible solutions:"
-            echo "   1. Stop all other deployments/instances"
-            echo "   2. Wait 30-60 seconds for Telegram to clear the session"
-            echo "   3. Re-authenticate via the dashboard"
+            echo "   This error occurs when another instance uses the same Telegram session."
+            echo ""
+            echo "💡 MOST LIKELY CAUSE:"
+            echo "   During deployment, Render briefly runs TWO containers simultaneously."
+            echo "   Both try to connect to Telegram → AUTH_KEY_DUPLICATED"
+            echo ""
+            echo "✅ SOLUTION APPLIED:"
+            echo "   - Health check configured: /health/userbot"
+            echo "   - Graceful shutdown: 15s disconnect window"
+            echo "   - Startup delay: Prevents overlap"
+            echo ""
+            echo "🔄 NEXT STEPS:"
+            echo "   This deployment will fail, but the NEXT one should succeed."
+            echo "   The health check will prevent future overlaps."
+            echo ""
+            echo "⚠️  IF THIS PERSISTS:"
+            echo "   1. Check Render dashboard for multiple running instances"
+            echo "   2. Manually suspend service, wait 30s, then resume"
+            echo "   3. Re-authenticate via dashboard if needed"
             exit 2
         elif [ "$EXIT_CODE" = "3" ]; then
             echo ""

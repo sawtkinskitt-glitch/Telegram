@@ -480,6 +480,69 @@ def health():
         'details': 'Web server is running' + (' and userbot is active' if userbot_running else ', but userbot is not running')
     })
 
+@app.route('/health/userbot')
+def health_userbot():
+    """Strict health check for Render - ONLY passes if userbot is truly running and healthy"""
+    import os
+    import time
+    
+    # Check if userbot PID file exists
+    if not os.path.exists('/tmp/moonuserbot.pid'):
+        return jsonify({
+            'status': 'unhealthy',
+            'reason': 'no_pid_file',
+            'message': 'Userbot has not started yet'
+        }), 503
+    
+    try:
+        with open('/tmp/moonuserbot.pid', 'r') as f:
+            pid = int(f.read().strip())
+        
+        # Check if process is alive
+        os.kill(pid, 0)
+        
+        # Check if PID file is recent (not stale)
+        pid_file_age = time.time() - os.path.getmtime('/tmp/moonuserbot.pid')
+        if pid_file_age > 300:  # Stale if older than 5 minutes without update
+            return jsonify({
+                'status': 'unhealthy',
+                'reason': 'stale_pid',
+                'message': f'PID file is {int(pid_file_age)}s old (stale)',
+                'pid': pid
+            }), 503
+        
+        # Check if log file exists and has recent activity
+        if os.path.exists('/tmp/moonuserbot.log'):
+            log_age = time.time() - os.path.getmtime('/tmp/moonuserbot.log')
+            if log_age > 120:  # No log activity in 2 minutes = might be hung
+                return jsonify({
+                    'status': 'degraded',
+                    'reason': 'no_recent_activity',
+                    'message': f'No log activity for {int(log_age)}s',
+                    'pid': pid
+                }), 200  # Still return 200 as it might be idle
+        
+        # All checks passed
+        return jsonify({
+            'status': 'healthy',
+            'userbot_pid': pid,
+            'userbot_running': True,
+            'message': 'Userbot is running and healthy'
+        }), 200
+        
+    except (OSError, ValueError, ProcessLookupError) as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'reason': 'process_dead',
+            'message': f'Userbot process not found: {str(e)}'
+        }), 503
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'reason': 'check_failed',
+            'message': f'Health check error: {str(e)}'
+        }), 503
+
 @app.route('/api/safety/limits/<int:account_id>')
 def get_safety_limits(account_id):
     """Get rate limit quotas and ban risk for an account"""

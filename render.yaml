@@ -12,6 +12,8 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
+    healthCheckPath: /health/userbot
+    autoDeploy: true
     envVars:
       - key: API_ID
         value: 22595574
