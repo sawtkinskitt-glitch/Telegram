@@ -123,7 +123,7 @@ class SqliteDatabase(Database):
         return json.loads(row["val"])
 
     def _execute(self, module: str, *args, **kwargs) -> sqlite3.Cursor:
-        pattern = r"^(core|custom)"
+        pattern = r"^(core|custom|account)"
         if not re.match(pattern, module):
             raise ValueError(f"Invalid module name format: {module}")
 
