@@ -1,17 +1,39 @@
 services:
-- type: worker
-  name: Moon-Userbot
-  runtime: docker
-  repo: https://github.com/The-MoonTg-project/Moon-Userbot
-  plan: starter
-  envVars:
-  - key: STABILITY_KEY
-    sync: false
-  - key: CLARIFAI_PAT
-    sync: false
-  - key: .env
-    sync: false
-  region: oregon
-  dockerContext: .
-  dockerfilePath: ./Dockerfile
-version: "1"
+  - type: web
+    name: moon-userbot
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: API_ID
+        value: 22595574
+      - key: API_HASH
+        value: 6f8f406b4cc917a55c639f78be182c8d
+      - key: STRINGSESSION
+        value: AQFYx_YAiEAoTc6wdZw7Vph40rtMe9a0ItZgY0OLv9XqxFQwsY2tdtzj1MZqvcg2ENmDDiU8xfwygWfsTKiM_J5IUE8yRdclHAYTd-3zRwJx5E9yKXYuNdC-aHUU4ltDkS99T7sx1suhagipa3W2O11Jwj6FDM1AIMOC9S0Y26jNfOLG38veWQ6IeKUxV0obb3htPqETljG6IfBz-rhGZlqwh4eb4I0trJ4PuHLUaTGy15oZPNhCqgMovZhQJueS7qeaWQF1pO9cGh7FZVLwgNBfMvZgyyfFqEGpBV8P0uEa9lvEZTERWoSos0VG-crYvd6Pz1vea6Bjf_Eto1Zhg0G3FzgK0AAAAAHIrU_aAA
+      - key: DATABASE_TYPE
+        value: sqlite3
+      - key: DATABASE_NAME
+        value: db.sqlite3
+      - key: DATABASE_URL
+        value: ""
+      - key: PM_LIMIT
+        value: 4
+      - key: SECOND_SESSION
+        value: ""
+      - key: APIFLASH_KEY
+        value: ""
+      - key: RMBG_KEY
+        value: ""
+      - key: VT_KEY
+        value: ""
+      - key: GEMINI_KEY
+        value: ""
+      - key: COHERE_KEY
+        value: ""
+      - key: TEST_SERVER
+        value: false
+      - key: MODULES_REPO_BRANCH
+        value: master
