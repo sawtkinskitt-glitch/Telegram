@@ -2317,6 +2317,27 @@
         </div>
     </nav>
 
+    <!-- 🛡️ ANTI-BAN ALERT BANNER (Shows only when issues exist) -->
+    <div id="antibanAlertBanner" style="display: none; background: linear-gradient(135deg, #FF3B30 0%, #FF9500 100%); color: white; padding: 12px 24px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.15); border-bottom: 1px solid rgba(255,255,255,0.2);">
+        <div style="max-width: 980px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 12px; flex: 1; min-width: 200px;">
+                <span id="alertEmoji" style="font-size: 24px;">🚨</span>
+                <div style="text-align: left;">
+                    <div id="alertTitle" style="font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">Account Health Alert</div>
+                    <div id="alertMessage" style="font-size: 13px; opacity: 0.9; margin-top: 2px;">Loading...</div>
+                </div>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button onclick="viewHealthDetails()" style="background: rgba(255,255,255,0.25); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 6px 14px; border-radius: 8px; font-size: 13px; font-weight: 590; cursor: pointer; transition: all 0.2s;">
+                    View Details
+                </button>
+                <button onclick="dismissAlert()" style="background: rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 6px 14px; border-radius: 8px; font-size: 13px; font-weight: 590; cursor: pointer; transition: all 0.2s;">
+                    Dismiss
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Apple-style Stats Bar -->
     <section class="stats-bar" aria-label="Statistics overview">
         <div class="stats-container">
@@ -2339,6 +2360,18 @@
             <div class="stat-card">
                 <div class="stat-value red" id="risky-count">0</div>
                 <div class="stat-label">Risky</div>
+            </div>
+            
+            <!-- 🛡️ ANTI-BAN HEALTH WIDGET -->
+            <div class="stat-card" id="antiban-health-widget" style="cursor: pointer; position: relative;" onclick="showHealthModal()" title="Click for detailed health report">
+                <div style="position: relative;">
+                    <div class="stat-value" id="ban-risk-score" style="color: var(--apple-green);">--</div>
+                    <div class="stat-label">BAN RISK</div>
+                    <div id="health-indicators" style="margin-top: 4px; display: flex; gap: 4px; justify-content: center; flex-wrap: wrap; font-size: 10px;">
+                        <span id="warming-badge" class="status-badge" style="display: none; padding: 2px 6px; border-radius: 4px; font-weight: 600;"></span>
+                        <span id="quarantine-badge" class="status-badge" style="display: none; background: #FF3B30; color: white; padding: 2px 6px; border-radius: 4px; font-weight: 600;">QUARANTINE</span>
+                    </div>
+                </div>
             </div>
         </div>
     </section>
@@ -4315,6 +4348,146 @@
         // Initialize
         CommandPalette.init();
         loadData();
+    </script>
+
+    <!-- 🛡️ ANTI-BAN SYSTEM JAVASCRIPT -->
+    <script>
+        // Global account ID (get from first account or user selection)
+        let currentAccountId = null;
+
+        // Fetch and display anti-ban health status
+        async function loadAntiBanHealth() {
+            try {
+                // Get account ID from somewhere (first account for now)
+                if (!currentAccountId) {
+                    const accounts = await fetch('/api/accounts').then(r => r.json());
+                    if (accounts.success && accounts.accounts && accounts.accounts.length > 0) {
+                        currentAccountId = accounts.accounts[0].id || accounts.accounts[0].account_id;
+                    }
+                    
+                    if (!currentAccountId) {
+                        console.log('No account ID available for anti-ban check');
+                        return;
+                    }
+                }
+
+                const response = await fetch(`/api/anti-ban/dashboard-summary/${currentAccountId}`);
+                
+                if (!response.ok) {
+                    console.log('Anti-ban API not available');
+                    return;
+                }
+                
+                const data = await response.json();
+                
+                if (data.success && data.summary) {
+                    updateHealthWidget(data.summary);
+                    updateAlertBanner(data.summary);
+                }
+            } catch (error) {
+                console.error('Error loading anti-ban health:', error);
+            }
+        }
+
+        // Update the health widget in stats bar
+        function updateHealthWidget(summary) {
+            const scoreElement = document.getElementById('ban-risk-score');
+            const warmingBadge = document.getElementById('warming-badge');
+            const quarantineBadge = document.getElementById('quarantine-badge');
+            
+            if (!scoreElement) return;
+            
+            const score = summary.ban_risk.score;
+            const emoji = summary.ban_risk.emoji;
+            
+            scoreElement.innerHTML = `${emoji} ${score}`;
+            
+            // Color based on risk level
+            if (score <= 20) {
+                scoreElement.style.color = 'var(--apple-green)';
+            } else if (score <= 40) {
+                scoreElement.style.color = '#007AFF';
+            } else if (score <= 70) {
+                scoreElement.style.color = 'var(--apple-orange)';
+            } else {
+                scoreElement.style.color = 'var(--apple-red)';
+            }
+            
+            // Update warming badge
+            if (!summary.warming.warmed) {
+                warmingBadge.style.display = 'inline-block';
+                warmingBadge.textContent = `${summary.warming.days_remaining}d left`;
+                warmingBadge.style.background = '#FF9500';
+                warmingBadge.style.color = 'white';
+            } else {
+                warmingBadge.style.display = 'none';
+            }
+            
+            // Update quarantine badge
+            quarantineBadge.style.display = summary.status.quarantined ? 'inline-block' : 'none';
+        }
+
+        // Update alert banner (show only if issues)
+        function updateAlertBanner(summary) {
+            const banner = document.getElementById('antibanAlertBanner');
+            const emoji = document.getElementById('alertEmoji');
+            const title = document.getElementById('alertTitle');
+            const message = document.getElementById('alertMessage');
+            
+            if (!banner) return;
+            
+            if (summary.alerts.has_alerts) {
+                banner.style.display = 'block';
+                
+                if (summary.status.quarantined) {
+                    emoji.textContent = '🚨';
+                    title.textContent = 'Quarantine Mode Active';
+                    message.textContent = 'High-risk operations are blocked for account safety';
+                    banner.style.background = 'linear-gradient(135deg, #FF3B30 0%, #D70015 100%)';
+                } else if (summary.ban_risk.score >= 70) {
+                    emoji.textContent = '⚠️';
+                    title.textContent = 'Critical Ban Risk';
+                    message.textContent = `Ban risk: ${summary.ban_risk.score}/100 - Reduce activity immediately`;
+                    banner.style.background = 'linear-gradient(135deg, #FF9500 0%, #FF3B30 100%)';
+                } else if (summary.status.recovering) {
+                    emoji.textContent = '🔄';
+                    title.textContent = 'Recovery Mode Active';
+                    message.textContent = 'Operating at 25% rate limits after FloodWait event';
+                    banner.style.background = 'linear-gradient(135deg, #007AFF 0%, #5E5CE6 100%)';
+                } else if (summary.alerts.floodwaits_7d > 0) {
+                    emoji.textContent = '⏸️';
+                    title.textContent = 'Recent FloodWait Events';
+                    message.textContent = `${summary.alerts.floodwaits_7d} FloodWait(s) in last 7 days - Exercise caution`;
+                    banner.style.background = 'linear-gradient(135deg, #FF9500 0%, #FF6B00 100%)';
+                }
+            } else {
+                banner.style.display = 'none';
+            }
+        }
+
+        // Show health details modal
+        function showHealthModal() {
+            alert('Detailed health report coming soon!\\n\\nUse Telegram commands:\\n.health - Full health check\\n.banrisk - Ban risk assessment\\n.quarantine status - Quarantine info');
+        }
+
+        // View health details from alert
+        function viewHealthDetails() {
+            showHealthModal();
+        }
+
+        // Dismiss alert banner
+        function dismissAlert() {
+            const banner = document.getElementById('antibanAlertBanner');
+            if (banner) {
+                banner.style.display = 'none';
+            }
+        }
+
+        // Load anti-ban health on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(loadAntiBanHealth, 2000);
+            setInterval(loadAntiBanHealth, 30000);
+        });
     </script>
 </body>
 </html>
