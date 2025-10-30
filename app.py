@@ -1,17 +1,28 @@
 from flask import Flask, render_template, jsonify, request
-from db_manager import (
-    AccountManager,
-    SafetyMetricsManager,
-    AnalyticsManager,
-    init_database,
-    get_db_connection,
-)
-from utils.safety_guardian import guardian
 import os
 from datetime import datetime
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import base64
 import secrets
+
+# ========== DATABASE IMPORTS (with graceful fallback) ==========
+try:
+    from db_manager import (
+        AccountManager,
+        SafetyMetricsManager,
+        AnalyticsManager,
+        init_database,
+        get_db_connection,
+    )
+    from utils.safety_guardian import guardian
+    DB_IMPORTS_AVAILABLE = True
+except Exception as e:
+    print(f"⚠️  Database modules not available: {e}")
+    print("   Dashboard will run in view-only mode")
+    DB_IMPORTS_AVAILABLE = False
+    # Create dummy init_database function
+    def init_database():
+        pass
 
 # ========== ANTI-BAN SYSTEM IMPORTS ==========
 try:
@@ -29,22 +40,19 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(24).hex())
 
 ENCRYPTION_KEY = os.environ.get('ACCOUNT_ENCRYPTION_KEY')
-if not ENCRYPTION_KEY:
-    print("=" * 80)
-    print("🔒 SECURITY ERROR: ACCOUNT_ENCRYPTION_KEY environment variable is required!")
-    print("=" * 80)
-    print("This key is needed to encrypt/decrypt session data securely.")
-    print("Without it, all encrypted account sessions will be lost on restart.")
-    print()
-    print("To fix this:")
-    print("1. Generate a key: python -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())'")
-    print("2. Add it to Replit Secrets as ACCOUNT_ENCRYPTION_KEY")
-    print("3. Restart the application")
-    print("=" * 80)
-    import sys
-    sys.exit(1)
+DATABASE_AVAILABLE = False
 
-init_database()
+# Initialize database (gracefully handle failures)
+try:
+    if not ENCRYPTION_KEY:
+        print("⚠️  WARNING: ACCOUNT_ENCRYPTION_KEY not set - account management features will be limited")
+    init_database()
+    DATABASE_AVAILABLE = True
+    print("✅ Database initialized successfully")
+except Exception as db_error:
+    print(f"⚠️  Database initialization failed: {db_error}")
+    print("   Dashboard will start in limited mode (userbot features only)")
+    DATABASE_AVAILABLE = False
 
 def encrypt_data(plaintext):
     """Encrypt data using AES-256-GCM"""
