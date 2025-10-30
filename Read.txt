@@ -1,0 +1,6 @@
+Please clone https://github.com/The-MoonTg-project/Moon-Userbot to this repo and merge to main and setup render and all environment var and settings make a new thing on render and set up so that it works 100% - insesll everything you need to get it completed - debug tools everything here is the api key for render rnd_guvyw4P87Ow1HxOdJijdLEflv9Un here is the telegram acc info api_id = 22595574
+api_hash = "6f8f406b4cc917a55c639f78be182c8d" and #PYROGRAM #STRING_SESSION 
+
+AQFYx_YAiEAoTc6wdZw7Vph40rtMe9a0ItZgY0OLv9XqxFQwsY2tdtzj1MZqvcg2ENmDDiU8xfwygWfsTKiM_J5IUE8yRdclHAYTd-3zRwJx5E9yKXYuNdC-aHUU4ltDkS99T7sx1suhagipa3W2O11Jwj6FDM1AIMOC9S0Y26jNfOLG38veWQ6IeKUxV0obb3htPqETljG6IfBz-rhGZlqwh4eb4I0trJ4PuHLUaTGy15oZPNhCqgMovZhQJueS7qeaWQF1pO9cGh7FZVLwgNBfMvZgyyfFqEGpBV8P0uEa9lvEZTERWoSos0VG-crYvd6Pz1vea6Bjf_Eto1Zhg0G3FzgK0AAAAAHIrU_aAA 
+
+Let me know if you need anything. Else
