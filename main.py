@@ -56,19 +56,31 @@ from utils.misc import gitrepo, userbot_version
 from utils.module import ModuleManager
 from utils.rentry import rentry_cleanup_job
 from utils.scripts import restart
+from utils.device_fingerprints import get_fingerprint_for_account
 
 SCRIPT_PATH = os.path.dirname(os.path.realpath(__file__))
 if SCRIPT_PATH != os.getcwd():
     os.chdir(SCRIPT_PATH)
+
+# Get account ID for fingerprint (use 1 as default for single account)
+account_id = db.get("core.session", "account_id", 1)
+
+# Get realistic device fingerprint (CRITICAL: hides automation signature)
+fingerprint = get_fingerprint_for_account(account_id)
 
 common_params = {
     "api_id": config.api_id,
     "api_hash": config.api_hash,
     "hide_password": True,
     "workdir": SCRIPT_PATH,
-    "app_version": userbot_version,
-    "device_model": f"Moon-Userbot @ {gitrepo.head.commit.hexsha[:7]}",
-    "system_version": platform.version() + " " + platform.machine(),
+    
+    # ✅ REALISTIC FINGERPRINT (looks like official Telegram client)
+    "device_model": fingerprint['device_model'],
+    "system_version": fingerprint['system_version'],
+    "app_version": fingerprint['app_version'],
+    "lang_code": fingerprint.get('lang_code', 'en'),
+    "system_lang_code": fingerprint.get('system_lang_code', 'en-US'),
+    
     "sleep_threshold": 30,
     "test_mode": config.test_server,
     "parse_mode": ParseMode.HTML,

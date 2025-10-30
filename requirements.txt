@@ -18,3 +18,4 @@ aiohttp
 aiofiles
 pySmartDL
 cryptography
+numpy

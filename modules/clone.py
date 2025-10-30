@@ -26,6 +26,9 @@ from pyrogram import errors
 from utils.misc import modules_help, prefix
 from utils.db import db
 from utils.config import gemini_key, cohere_key
+from utils.safe_clone_operations import apply_profile_SAFE, handle_flood_wait_safe
+from utils.human_timing import timer
+from utils.account_warming import warmer
 
 try:
     from utils.safety_guardian import create_guardian
@@ -232,10 +235,23 @@ async def get_full_profile(client: Client, user_id):
     return profile
 
 
-async def apply_profile(client: Client, profile_data, elements=None, rollback_data=None, photo_indices=None, is_rollback=False):
-    """Apply profile data with enhanced error handling and verification"""
+async def apply_profile(client: Client, profile_data, elements=None, rollback_data=None, photo_indices=None, is_rollback=False, message: Message = None):
+    """
+    Apply profile data with SAFE HUMAN TIMING
+    
+    CRITICAL CHANGES (2025 Anti-Ban Research):
+    1. SEQUENTIAL operations (never simultaneous)
+    2. 2-5 minute delays between each change
+    3. RANDOM operation order (anti-pattern detection)
+    4. Thinking time before each operation
+    5. Full stop on FloodWait
+    
+    WARNING: This will take 5-15 minutes to complete!
+    """
+    from utils.human_timing import timer
+    
     if elements is None:
-        elements = ["name", "bio", "username", "photo", "emoji_status", "accent_color"]
+        elements = ["name", "bio", "photo"]  # Removed risky defaults (emoji, accent, username)
     
     applied = []
     errors_list = []
@@ -627,6 +643,51 @@ async def clone_profile(client: Client, message: Message):
         history = history[-50:]
     db.set("core.clone", "history", history)
     
+    # ========== QUARANTINE CHECK (Component 5) ==========
+    # Auto-quarantine blocks high-risk operations if health is poor
+    is_quarantined = db.get(f"account.{me.id}", "quarantine_mode", False)
+    if is_quarantined:
+        await message.edit(
+            "<b>🚨 OPERATION BLOCKED: Account in Quarantine Mode</b>\n\n"
+            "<b>Reason:</b> Poor account health detected\n"
+            "<b>Action:</b> Clone operations suspended\n\n"
+            "<i>Run .health to check status\n"
+            "Run .quarantine off to disable (not recommended)</i>"
+        )
+        return
+    
+    # ========== ACCOUNT WARMING CHECK (Component 4) ==========
+    # Research: "New accounts cannot clone - instant ban"
+    # Get account creation date from Telegram
+    account_created = getattr(me, 'created_date', None) or datetime.now()
+    account_age_days = warmer.get_account_age_days(account_created)
+    
+    # Check if clone is allowed for this account age
+    allowed, warming_reason = warmer.is_action_allowed(account_age_days, 'clone')
+    if not allowed:
+        await message.edit(warming_reason)
+        return
+    
+    # Check daily clone quota
+    has_quota, quota_msg, remaining = await warmer.check_daily_operation_quota(
+        me.id, 'clone', db
+    )
+    if not has_quota:
+        await message.edit(quota_msg)
+        return
+    
+    # Show warming status if account still warming
+    if account_age_days < 30:
+        is_premium = getattr(me, 'is_premium', False)
+        warming_status = warmer.get_warming_status_message(account_age_days, is_premium)
+        await message.edit(
+            f"{warming_status}\n\n"
+            f"<b>✅ Clone allowed</b>\n"
+            f"<b>Remaining today:</b> {remaining} clones\n\n"
+            f"<i>Starting in 3 seconds...</i>"
+        )
+        await asyncio.sleep(3)
+    
     if SAFETY_GUARDIAN_AVAILABLE:
         try:
             phone = getattr(me, 'phone_number', None)
@@ -670,14 +731,24 @@ async def clone_profile(client: Client, message: Message):
             print(f"⚠️  SafetyGuardian check failed: {e}")
             await message.edit("<b>🔄 Applying clone...</b>\n<i>(Safety checks unavailable)</i>")
     else:
-        await message.edit("<b>🔄 Applying clone...</b>")
+        await message.edit(
+        "<b>🔄 Starting SAFE clone operation...</b>\n"
+        "<i>This will take 5-15 minutes with human timing delays</i>\n\n"
+        "⏳ Phase 1: Thinking delay...\n"
+        "⏳ Phase 2: Sequential operations\n"
+        "⏳ Phase 3: Inter-operation delays (2-5 min each)\n\n"
+        "<i>Do not interrupt - anti-ban protection active</i>"
+    )
     
-    result = await apply_profile(
+    # Use SAFE version with human timing
+    result = await apply_profile_SAFE(
         client,
         target_profile,
         elements=elements,
         rollback_data=current_profile,
-        photo_indices=photo_indices
+        photo_indices=photo_indices,
+        is_rollback=False,
+        message=message
     )
     
     if SAFETY_GUARDIAN_AVAILABLE and result["success"]:
@@ -694,6 +765,10 @@ async def clone_profile(client: Client, message: Message):
             await guardian.human_delay("clone_operation")
         except Exception as e:
             print(f"⚠️  SafetyGuardian logging failed: {e}")
+    
+    # Increment usage counter on successful clone (Component 4)
+    if result["success"]:
+        warmer.increment_daily_usage(me.id, 'clone', db)
     
     if result["success"]:
         success_msg = f"<b>✅ Profile cloned successfully!</b>\n\n"
