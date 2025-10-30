@@ -1,0 +1,5 @@
+# Force Render to rebuild - timestamp: 2025-10-30 23:30:00
+# This file forces a cache-busting rebuild
+DEPLOYMENT_VERSION=v2.0-dashboard-fix
+BUILD_TIMESTAMP=2025-10-30T23:30:00Z
+ISSUE=Dashboard showing "This is Moon" - forcing fresh build
