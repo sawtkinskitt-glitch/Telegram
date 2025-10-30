@@ -64,7 +64,8 @@
 ### ⛺ Optional Vars
  
  - `STRINGSESSION`
-     - only If you want to use on cloud hosts use [string_gen.py](https://github.com/The-MoonTg-project/Moon-Userbot/blob/main/string_gen.py) to generate OR
+    - Use this once to bootstrap an account. After the session is imported via the web dashboard, remove the variable (or leave it empty) to avoid Telegram `AUTH_KEY_DUPLICATED` errors.
+    - You can generate a session string with [string_gen.py](https://github.com/The-MoonTg-project/Moon-Userbot/blob/main/string_gen.py) OR
 [![Run on Repl.it](https://replit.com/badge)](https://replit.com/@ABHITHEMODDER/MoonUb-Session-Gen)
 > [!IMPORTANT]
 > `STRINGSESSION` is necessary for deployment through Docker/Cloud Host etc.

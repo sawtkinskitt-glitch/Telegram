@@ -235,6 +235,57 @@ class AccountManager:
             return dict(account) if account else None
     
     @staticmethod
+    def get_primary_account():
+        """Return the account marked as primary"""
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id FROM telegram_accounts
+                WHERE is_primary = TRUE
+                ORDER BY last_active DESC NULLS LAST, created_at DESC
+                LIMIT 1
+                """
+            )
+            row = cursor.fetchone()
+            cursor.close()
+        if row:
+            return AccountManager.get_account_by_id(row[0])
+        return None
+
+    @staticmethod
+    def get_recent_account():
+        """Return the most recently active account (prefers active ones)"""
+        account_id = None
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id FROM telegram_accounts
+                WHERE is_active = TRUE
+                ORDER BY last_active DESC NULLS LAST, created_at DESC
+                LIMIT 1
+                """
+            )
+            row = cursor.fetchone()
+            if row:
+                account_id = row[0]
+            else:
+                cursor.execute(
+                    """
+                    SELECT id FROM telegram_accounts
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """
+                )
+                row = cursor.fetchone()
+                account_id = row[0] if row else None
+            cursor.close()
+        if account_id:
+            return AccountManager.get_account_by_id(account_id)
+        return None
+
+    @staticmethod
     def update_account_status(phone, status, last_active=None):
         """Update account status using existing schema columns"""
         with get_db_connection() as conn:
@@ -267,6 +318,24 @@ class AccountManager:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM telegram_accounts WHERE id = %s", (account_id,))
+            cursor.close()
+
+    @staticmethod
+    def clear_account_session(account_id, status="auth_error"):
+        """Clear stored session data for an account and mark inactive"""
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE telegram_accounts
+                SET session_encrypted = NULL,
+                    last_active = CURRENT_TIMESTAMP,
+                    account_status = %s,
+                    is_active = FALSE
+                WHERE id = %s
+                """,
+                (status, account_id),
+            )
             cursor.close()
 
 class SafetyMetricsManager:
