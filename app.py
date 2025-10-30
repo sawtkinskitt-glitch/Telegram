@@ -7,6 +7,18 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import base64
 import secrets
 
+# ========== ANTI-BAN SYSTEM IMPORTS ==========
+try:
+    from utils.ban_risk_calculator import risk_calculator
+    from utils.account_warming import warmer
+    from utils.shadowban_detector import detector
+    from utils.floodwait_recovery import recovery_manager
+    from utils.db import db
+    ANTI_BAN_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️  Anti-ban modules not fully available: {e}")
+    ANTI_BAN_AVAILABLE = False
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(24).hex())
 
