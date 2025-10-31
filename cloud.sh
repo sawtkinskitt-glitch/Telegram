@@ -199,8 +199,29 @@ fi
 
 echo "✅ app.py found, size: $(wc -c < app.py) bytes"
 echo "First line: $(head -1 app.py)"
+echo "Last line: $(tail -1 app.py)"
+echo "---"
+echo "First 50 lines of app.py:"
+head -50 app.py
+echo "---"
 
-# Test Flask import before starting Gunicorn
+# Check what Python will actually import
+echo "🐍 Testing what Python imports as 'app' module..."
+python3 -c "
+import sys
+import app
+print(f'  Module: {app.__file__}')
+print(f'  Module size: {len(open(app.__file__).read())} bytes')
+print(f'  Has Flask app attr: {hasattr(app, \"app\")}')
+if hasattr(app, 'app'):
+    rules = list(app.app.url_map._rules)
+    print(f'  Number of routes: {len(rules)}')
+    print(f'  First 5 routes: {[str(r) for r in rules[:5]]}')
+else:
+    print('  ERROR: No app attribute found!')
+" 2>&1 || echo "  Import test failed!"
+
+# Test Flask import
 echo "🐍 Testing Flask import..."
 python3 -c "from flask import Flask; print('  Flask imported successfully')" || exit 1
 
