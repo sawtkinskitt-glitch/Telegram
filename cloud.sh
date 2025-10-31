@@ -179,6 +179,17 @@ fi
 
 # Start web server on PORT (required for Render) - WITHOUT exec to keep shell alive
 echo "🌐 Starting web server on $BIND_ADDR..."
+
+# Debug: Show what Python files exist
+echo "📂 Python files in current directory:"
+ls -la /app/*.py 2>&1 | head -15 || ls -la *.py 2>&1 | head -15
+
+# Debug: Test Python import
+echo "🐍 Testing Python import of app module:"
+python3 -c "import app; print(f'  Module location: {app.__file__}'); print(f'  Has Flask app: {hasattr(app, \"app\")}'); print(f'  First route: {list(app.app.url_map._rules)[0] if hasattr(app, \"app\") else \"N/A\"}')" 2>&1 || echo "  Import failed!"
+
+# Start Gunicorn with explicit path
+echo "🚀 Starting Gunicorn..."
 gunicorn app:app --bind "$BIND_ADDR" --workers 2 --timeout 120 --access-logfile - --error-logfile - &
 GUNICORN_PID=$!
 echo "$GUNICORN_PID" > "$GUNICORN_PID_FILE"
