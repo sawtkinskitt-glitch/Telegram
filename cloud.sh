@@ -180,17 +180,33 @@ fi
 # Start web server on PORT (required for Render) - WITHOUT exec to keep shell alive
 echo "🌐 Starting web server on $BIND_ADDR..."
 
+# AGGRESSIVE CLEANUP: Remove any old files that might be cached
+echo "🧹 Removing any cached old files..."
+cd /app || cd .
+rm -f app_old.py app_old.pyc 2>/dev/null || true
+find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+find . -name "*.pyc" -delete 2>/dev/null || true
+
 # Debug: Show what Python files exist
-echo "📂 Python files in current directory:"
-ls -la /app/*.py 2>&1 | head -15 || ls -la *.py 2>&1 | head -15
+echo "📂 Python files after cleanup:"
+ls -la *.py 2>&1 | grep -E "app.*\.py" || echo "No app*.py files found"
 
-# Debug: Test Python import
-echo "🐍 Testing Python import of app module:"
-python3 -c "import app; print(f'  Module location: {app.__file__}'); print(f'  Has Flask app: {hasattr(app, \"app\")}'); print(f'  First route: {list(app.app.url_map._rules)[0] if hasattr(app, \"app\") else \"N/A\"}')" 2>&1 || echo "  Import failed!"
+# Verify app.py exists and is correct
+if [ ! -f "app.py" ]; then
+    echo "❌ ERROR: app.py not found!"
+    exit 1
+fi
 
-# Start Gunicorn with explicit path
-echo "🚀 Starting Gunicorn..."
-gunicorn app:app --bind "$BIND_ADDR" --workers 2 --timeout 120 --access-logfile - --error-logfile - &
+echo "✅ app.py found, size: $(wc -c < app.py) bytes"
+echo "First line: $(head -1 app.py)"
+
+# Test Flask import before starting Gunicorn
+echo "🐍 Testing Flask import..."
+python3 -c "from flask import Flask; print('  Flask imported successfully')" || exit 1
+
+# Use python3 to start gunicorn with PYTHONPATH explicitly set
+echo "🚀 Starting Gunicorn with explicit Python path..."
+PYTHONPATH=/app:$PYTHONPATH python3 -m gunicorn app:app --bind "$BIND_ADDR" --workers 2 --timeout 120 --access-logfile - --error-logfile - &
 GUNICORN_PID=$!
 echo "$GUNICORN_PID" > "$GUNICORN_PID_FILE"
 echo "🌐 Gunicorn started (PID: $GUNICORN_PID)"
