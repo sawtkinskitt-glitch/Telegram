@@ -21,6 +21,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code (changes most frequently, so last)
 COPY . .
 
+# Explicitly remove any old backup files to ensure clean deployment
+RUN rm -f app_old.py db_manager_old.py *.pyc __pycache__/*.pyc 2>/dev/null || true
+
 # Make startup script executable
 RUN chmod +x cloud.sh
 
